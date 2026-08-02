@@ -1,0 +1,331 @@
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ScriptPreview } from './ScriptPreview';
+import { StreamingPlayer } from './StreamingPlayer';
+import { PlayIcon } from './TransportIcons';
+import { hasLlmAuth, resolveLlmAuth } from '../utils/auth';
+import { getSettings } from '../utils/storage';
+import type {
+  BriefPhase,
+  BriefProgress,
+  BriefResult,
+  ExtensionMessage,
+  Settings,
+} from '../utils/types';
+
+interface BriefStateResponse {
+  progress: BriefProgress;
+  result: BriefResult | null;
+  running: boolean;
+}
+
+interface OverlayAppProps {
+  onClose: () => void;
+}
+
+/** Short meter labels only — no idle instructional copy, no long headlines. */
+function meterLabel(
+  phase: BriefPhase,
+  error: string,
+  extracting: boolean,
+): string {
+  if (error) {
+    const lower = error.toLowerCase();
+    if (
+      lower.includes('api key') ||
+      lower.includes('connect') ||
+      lower.includes('provider')
+    ) {
+      return 'No auth';
+    }
+    return 'Fault';
+  }
+  if (extracting) {
+    switch (phase) {
+      case 'extracting':
+        return 'Extract…';
+      case 'understanding':
+        return 'Read…';
+      case 'writing':
+        return 'Write…';
+      default:
+        return 'Brief…';
+    }
+  }
+  return '';
+}
+
+export function OverlayApp({ onClose }: OverlayAppProps) {
+  const [settings, setSettings] = useState<Settings | null>(null);
+  const [phase, setPhase] = useState<BriefPhase>('idle');
+  const [extracting, setExtracting] = useState(false);
+  const [result, setResult] = useState<BriefResult | null>(null);
+  const [error, setError] = useState('');
+  const [streamKey, setStreamKey] = useState(0);
+  const [narrating, setNarrating] = useState(false);
+
+  const hasScriptRef = useRef(false);
+  hasScriptRef.current = Boolean(result);
+
+  const hasAuth = settings ? hasLlmAuth(settings) : null;
+  const busy = extracting || narrating;
+  const playerAuth =
+    result && settings && hasLlmAuth(settings)
+      ? (() => {
+          try {
+            return resolveLlmAuth(settings);
+          } catch {
+            return null;
+          }
+        })()
+      : null;
+  const hasPlayer = Boolean(result && playerAuth);
+
+  useEffect(() => {
+    void (async () => {
+      const loaded = await getSettings();
+      setSettings(loaded);
+
+      const state = (await browser.runtime.sendMessage({
+        type: 'GET_BRIEF_STATE',
+      })) as BriefStateResponse;
+      setPhase(state.progress.phase);
+      setExtracting(state.running);
+      if (state.result) {
+        setResult(state.result);
+        if (state.progress.phase === 'generating_audio') {
+          setNarrating(true);
+          setStreamKey((k) => k + 1);
+        }
+      }
+    })();
+
+    const onMessage = (message: ExtensionMessage) => {
+      if (message.type === 'BRIEF_PROGRESS') {
+        if (
+          message.progress.phase === 'generating_audio' &&
+          hasScriptRef.current
+        ) {
+          return;
+        }
+        setPhase(message.progress.phase);
+        setError('');
+        if (
+          message.progress.phase === 'extracting' ||
+          message.progress.phase === 'understanding' ||
+          message.progress.phase === 'writing'
+        ) {
+          setExtracting(true);
+        } else {
+          setExtracting(false);
+        }
+      }
+      if (message.type === 'BRIEF_SCRIPT_READY') {
+        setResult(message.result);
+        setPhase('generating_audio');
+        setExtracting(false);
+        setNarrating(true);
+        setError('');
+        setStreamKey((k) => k + 1);
+      }
+      if (message.type === 'BRIEF_ERROR') {
+        setPhase('error');
+        setError(message.error);
+        setExtracting(false);
+        setNarrating(false);
+      }
+    };
+
+    const onStorageChanged: Parameters<
+      typeof browser.storage.onChanged.addListener
+    >[0] = (changes, area) => {
+      if (area !== 'local') return;
+      if (!changes.autovoxSettings) return;
+      void getSettings().then((loaded) => {
+        setSettings(loaded);
+        if (hasLlmAuth(loaded)) {
+          setError((prev) => {
+            const lower = prev.toLowerCase();
+            if (
+              lower.includes('api key') ||
+              lower.includes('connect') ||
+              lower.includes('provider')
+            ) {
+              return '';
+            }
+            return prev;
+          });
+          setPhase((prev) => (prev === 'error' ? 'idle' : prev));
+        }
+      });
+    };
+
+    browser.runtime.onMessage.addListener(onMessage);
+    browser.storage.onChanged.addListener(onStorageChanged);
+    return () => {
+      browser.runtime.onMessage.removeListener(onMessage);
+      browser.storage.onChanged.removeListener(onStorageChanged);
+    };
+  }, []);
+
+  const openOptions = () => {
+    void browser.runtime.sendMessage({ type: 'OPEN_OPTIONS' });
+  };
+
+  const startBrief = async () => {
+    const latest = await getSettings();
+    setSettings(latest);
+    if (!hasLlmAuth(latest)) {
+      setError('Connect with OpenRouter or add an OpenAI API key in Options first.');
+      setPhase('error');
+      return;
+    }
+
+    setError('');
+    setResult(null);
+    setNarrating(false);
+    setExtracting(true);
+    setPhase('extracting');
+
+    const response = (await browser.runtime.sendMessage({
+      type: 'START_BRIEF',
+    })) as { ok: boolean; error?: string };
+
+    if (!response?.ok) {
+      setExtracting(false);
+      setPhase('error');
+      setError(response?.error ?? 'Could not start briefing');
+    }
+  };
+
+  const clearBrief = async () => {
+    await browser.runtime.sendMessage({ type: 'CLEAR_BRIEF' });
+    setResult(null);
+    setPhase('idle');
+    setError('');
+    setExtracting(false);
+    setNarrating(false);
+  };
+
+  const handlePlaying = useCallback(() => {
+    setPhase('ready');
+    setNarrating(true);
+  }, []);
+
+  const handleDone = useCallback(() => {
+    setPhase('ready');
+    setNarrating(false);
+  }, []);
+
+  const handleError = useCallback((message: string) => {
+    setPhase('error');
+    setNarrating(false);
+    setError(message);
+  }, []);
+
+  const label =
+    hasAuth === false ? 'No auth' : meterLabel(phase, error, extracting);
+
+  return (
+    <div className="autovox-card">
+      <div className="autovox-card__face">
+        <header className="autovox-card__header">
+          <h1 className="autovox-card__title">Autovox</h1>
+          <button
+            type="button"
+            className="autovox-btn autovox-btn--ghost autovox-btn--close"
+            onClick={onClose}
+            aria-label="Close Autovox"
+          >
+            Close
+          </button>
+        </header>
+
+        {hasPlayer ? (
+          <>
+            <StreamingPlayer
+              key={streamKey}
+              script={result!.script}
+              auth={playerAuth!}
+              voice={settings!.voice}
+              autoPlay
+              onPlaying={handlePlaying}
+              onDone={handleDone}
+              onError={handleError}
+            />
+            <p className="autovox-source">
+              {result!.source.siteName ? `${result!.source.siteName} · ` : ''}
+              {result!.source.title}
+            </p>
+            <ScriptPreview script={result!.script} />
+            <p className="autovox-notice">Synthetic voice · not human</p>
+          </>
+        ) : (
+          <div className="player">
+            <div className="player__bar">
+              <button
+                type="button"
+                className="player__icon-btn player__icon-btn--armed"
+                disabled={busy || hasAuth === false}
+                onClick={() => void startBrief()}
+                aria-label="Brief this page"
+              >
+                <PlayIcon />
+              </button>
+              <div
+                className={`player__scrub${extracting ? ' player__scrub--loading' : ''}`}
+                role="progressbar"
+                aria-label="Brief progress"
+                aria-valuemin={0}
+                aria-valuemax={1}
+                aria-valuenow={extracting ? 0.4 : 0}
+              >
+                <div className="player__scrub-rail">
+                  <div
+                    className="player__scrub-buffered"
+                    style={{ width: extracting ? '40%' : '0%' }}
+                  />
+                  <div
+                    className="player__scrub-fill"
+                    style={{ width: extracting ? '40%' : '0%' }}
+                  />
+                </div>
+              </div>
+              <span
+                className={`player__label${error || hasAuth === false ? ' player__label--error' : ''}${!label ? ' player__label--empty' : ''}`}
+                title={error || undefined}
+              >
+                {label || '\u00a0'}
+              </span>
+            </div>
+          </div>
+        )}
+
+        <div className="autovox-actions__meta">
+          <button
+            type="button"
+            className="autovox-link"
+            disabled={extracting}
+            onClick={openOptions}
+          >
+            Options
+          </button>
+          {result ? (
+            <>
+              <span className="autovox-actions__sep" aria-hidden="true">
+                ·
+              </span>
+              <button
+                type="button"
+                className="autovox-link"
+                disabled={extracting}
+                onClick={() => void clearBrief()}
+              >
+                Clear
+              </button>
+            </>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}

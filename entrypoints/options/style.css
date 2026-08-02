@@ -1,0 +1,236 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=JetBrains+Mono:wght@400;500;600&family=Sora:wght@400;500;600&display=swap');
+
+:root {
+  color-scheme: light;
+  --av-aluminum: #d7dbe0;
+  --av-face: #ffffff;
+  --av-ink: #141414;
+  --av-muted: #5c636a;
+  --av-accent: #e23b2f;
+  --av-accent-ink: #ffffff;
+  --av-track: #c9ced4;
+  --av-shadow: 4px 4px 0 #141414;
+  --av-font-brand: 'Bricolage Grotesque', 'Arial Narrow', sans-serif;
+  --av-font-ui: 'Sora', 'Segoe UI', sans-serif;
+  --av-font-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: var(--av-accent);
+  color: var(--av-accent-ink);
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  font-family: var(--av-font-ui);
+  color: var(--av-ink);
+  background-color: var(--av-aluminum);
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(20, 20, 20, 0.045) 0,
+    rgba(20, 20, 20, 0.045) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+}
+
+.page {
+  max-width: 440px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 3rem;
+}
+
+h1 {
+  margin: 0 0 0.5rem;
+  font-family: var(--av-font-brand);
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  line-height: 1;
+}
+
+.lead {
+  margin: 0 0 1.5rem;
+  font-family: var(--av-font-mono);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--av-muted);
+  line-height: 1.5;
+  max-width: 36em;
+}
+
+.form {
+  background: var(--av-face);
+  border: 2px solid var(--av-ink);
+  box-shadow: var(--av-shadow);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.1rem;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  font-family: var(--av-font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+input,
+select {
+  font-family: var(--av-font-ui);
+  font-weight: 400;
+  font-size: 0.9rem;
+  letter-spacing: 0;
+  text-transform: none;
+  padding: 0.65rem 0.7rem;
+  border: 2px solid var(--av-ink);
+  border-radius: 0;
+  background: var(--av-face);
+  color: var(--av-ink);
+}
+
+input:focus,
+select:focus {
+  outline: 2px solid var(--av-accent);
+  outline-offset: 2px;
+}
+
+.hint {
+  margin: 0;
+  font-size: 0.7rem;
+  font-weight: 400;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  font-family: var(--av-font-ui);
+  color: var(--av-muted);
+  line-height: 1.4;
+}
+
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding-top: 0.25rem;
+}
+
+button {
+  appearance: none;
+  border: 2px solid var(--av-ink);
+  border-radius: 0;
+  background: var(--av-accent);
+  color: var(--av-accent-ink);
+  padding: 0.7rem 1.15rem;
+  font-family: var(--av-font-brand);
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #c92f24;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--av-ink);
+  outline-offset: 2px;
+}
+
+.status {
+  font-family: var(--av-font-mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--av-muted);
+}
+
+.auth-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-bottom: 0.35rem;
+  border-bottom: 2px solid var(--av-track);
+}
+
+.auth-block__title {
+  margin: 0;
+  font-family: var(--av-font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.auth-block__copy {
+  margin: 0;
+}
+
+.auth-block__status {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.auth-block__connected {
+  margin: 0;
+  font-family: var(--av-font-mono);
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--av-ink);
+}
+
+.mono {
+  font-family: var(--av-font-mono);
+  word-break: break-all;
+}
+
+.warn {
+  color: var(--av-accent);
+}
+
+.warn code {
+  font-family: var(--av-font-mono);
+  font-size: 0.85em;
+}
+
+.btn-primary,
+.btn-secondary {
+  align-self: flex-start;
+}
+
+.btn-secondary {
+  background: var(--av-face);
+  color: var(--av-ink);
+}
+
+.btn-secondary:hover {
+  background: var(--av-aluminum);
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+button:disabled:hover {
+  background: var(--av-accent);
+}
+
+.btn-secondary:disabled:hover {
+  background: var(--av-face);
+}
