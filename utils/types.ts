@@ -72,8 +72,13 @@ export type ExtensionMessage =
   | { type: 'CLOSE_UI' }
   | { type: 'OPEN_OPTIONS' }
   | { type: 'START_BRIEF'; tabId?: number }
+  /** Brief state for the sender's tab + page URL only. */
   | { type: 'GET_BRIEF_STATE' }
+  /** Clears brief state for the sender's tab only. */
   | { type: 'CLEAR_BRIEF' }
+  /** Tab navigated — overlay should drop local brief UI. */
+  | { type: 'BRIEF_RESET' }
+  /** Targeted at the owning tab via tabs.sendMessage (not broadcast). */
   | { type: 'BRIEF_PROGRESS'; progress: BriefProgress }
   | { type: 'BRIEF_SCRIPT_READY'; result: BriefResult }
   | { type: 'BRIEF_ERROR'; error: string };

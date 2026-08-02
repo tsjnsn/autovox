@@ -28,7 +28,7 @@ export default defineConfig({
     // broad patterns so page access comes only from activeTab + scripting.
     'build:manifestGenerated': (_wxt, manifest) => {
       manifest.host_permissions = (manifest.host_permissions ?? []).filter(
-        (permission) => !BROAD_HOST_PERMISSIONS.has(permission),
+        (permission: string) => !BROAD_HOST_PERMISSIONS.has(permission),
       );
     },
   },

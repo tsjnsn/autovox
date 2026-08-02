@@ -10,6 +10,15 @@ function cleanText(text: string): string {
     .trim();
 }
 
+/** Remove Autovox UI so prior scripts / overlay chrome never enter the brief. */
+function stripAutovoxUi(root: ParentNode): void {
+  root
+    .querySelectorAll(
+      'autovox-overlay, .autovox-host, [data-autovox], [class*="autovox-"]',
+    )
+    .forEach((el) => el.remove());
+}
+
 /**
  * Extract the main article from the current document using Mozilla Readability.
  * Must run in a content-script context with DOM access.
@@ -19,11 +28,13 @@ export function extractArticleFromDocument(
 ): ExtractedArticle | null {
   const url = doc.location?.href ?? window.location.href;
   const clone = doc.cloneNode(true) as Document;
+  stripAutovoxUi(clone);
+
   const parsed = new Readability(clone, { charThreshold: 200 }).parse();
 
   if (!parsed?.textContent || parsed.textContent.trim().length < 120) {
-    // Fallback: grab readable body text when Readability can't find an article
-    const bodyText = cleanText(doc.body?.innerText ?? '');
+    // Use the cleaned clone — never live body.innerText (includes open shadow roots).
+    const bodyText = cleanText(clone.body?.textContent ?? '');
     if (bodyText.length < 120) return null;
 
     return {

@@ -1,9 +1,11 @@
 import { hasLlmAuth, resolveLlmAuth } from './auth';
 import {
-  clearBriefResult,
-  getSettings,
-  saveBriefResult,
-} from './storage';
+  clearTabBrief,
+  normalizePageUrl,
+  samePageUrl,
+  saveTabBriefResult,
+} from './briefState';
+import { getSettings } from './storage';
 import type {
   BriefProgress,
   BriefResult,
@@ -13,13 +15,6 @@ import type {
 import { understandArticle } from './understand';
 
 type ProgressFn = (progress: BriefProgress) => void;
-
-function broadcast(progress: BriefProgress): void {
-  const message: ExtensionMessage = { type: 'BRIEF_PROGRESS', progress };
-  void browser.runtime.sendMessage(message).catch(() => {
-    /* side panel may be closed */
-  });
-}
 
 async function pingContentScript(tabId: number): Promise<boolean> {
   try {
@@ -64,14 +59,32 @@ async function extractFromTab(tabId: number): Promise<ExtractedArticle> {
   return response.article;
 }
 
+async function assertStillOnPage(
+  tabId: number,
+  expectedUrl: string,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) {
+    throw new DOMException('Briefing aborted', 'AbortError');
+  }
+  const tab = await browser.tabs.get(tabId);
+  const current = tab.url ?? '';
+  if (!samePageUrl(current, expectedUrl)) {
+    throw new DOMException('Page changed during briefing', 'AbortError');
+  }
+}
+
 /**
  * Extract + understand only. TTS streams from the page overlay so playback
  * can start as soon as the script exists.
  */
 export async function runBriefPipeline(
   tabId: number,
-  onProgress: ProgressFn = broadcast,
+  pageUrl: string,
+  onProgress: ProgressFn,
+  signal?: AbortSignal,
 ): Promise<BriefResult> {
+  const expectedUrl = normalizePageUrl(pageUrl);
   const settings = await getSettings();
   if (!hasLlmAuth(settings)) {
     throw new Error(
@@ -86,7 +99,14 @@ export async function runBriefPipeline(
     detail: 'Pulling the main content from the page…',
   });
 
+  await assertStillOnPage(tabId, expectedUrl, signal);
   const article = await extractFromTab(tabId);
+  await assertStillOnPage(tabId, expectedUrl, signal);
+
+  // Extracted document must still be the page we started on
+  if (article.url && !samePageUrl(article.url, expectedUrl)) {
+    throw new DOMException('Page changed during briefing', 'AbortError');
+  }
 
   onProgress({
     phase: 'understanding',
@@ -106,16 +126,18 @@ export async function runBriefPipeline(
     reportLength: settings.reportLength,
   });
 
+  await assertStillOnPage(tabId, expectedUrl, signal);
+
   const result: BriefResult = {
     source: {
       title: article.title,
-      url: article.url,
+      url: expectedUrl,
       siteName: article.siteName,
     },
     script,
   };
 
-  await saveBriefResult(result);
+  await saveTabBriefResult(tabId, expectedUrl, result);
 
   onProgress({
     phase: 'generating_audio',
@@ -125,12 +147,10 @@ export async function runBriefPipeline(
 
   const ready: ExtensionMessage = { type: 'BRIEF_SCRIPT_READY', result };
   void browser.tabs.sendMessage(tabId, ready).catch(() => {});
-  void browser.runtime.sendMessage(ready).catch(() => {});
 
   return result;
 }
 
-export async function resetBrief(): Promise<void> {
-  await clearBriefResult();
-  broadcast({ phase: 'idle', message: 'Idle' });
+export async function resetBrief(tabId: number): Promise<void> {
+  await clearTabBrief(tabId);
 }

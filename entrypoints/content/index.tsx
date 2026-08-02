@@ -12,6 +12,7 @@ export default defineContentScript({
   async main(ctx) {
     let mounted = false;
     let ui: Awaited<ReturnType<typeof createShadowRootUi>> | null = null;
+    let lastUrl = location.href;
 
     const removeUi = () => {
       ui?.remove();
@@ -31,6 +32,7 @@ export default defineContentScript({
         onMount: (container) => {
           const host = document.createElement('div');
           host.className = 'autovox-host';
+          host.setAttribute('data-autovox', 'host');
           container.append(host);
 
           const app = document.createElement('div');
@@ -58,6 +60,24 @@ export default defineContentScript({
       return { open: true };
     };
 
+    /** SPA soft navigations keep this content script alive — drop the old player. */
+    const onUrlMaybeChanged = () => {
+      if (location.href === lastUrl) return;
+      lastUrl = location.href;
+      removeUi();
+    };
+
+    const wrapHistory = <T extends (...args: never[]) => unknown>(fn: T): T =>
+      ((...args: never[]) => {
+        const result = fn.apply(history, args);
+        queueMicrotask(onUrlMaybeChanged);
+        return result;
+      }) as T;
+
+    history.pushState = wrapHistory(history.pushState.bind(history));
+    history.replaceState = wrapHistory(history.replaceState.bind(history));
+    window.addEventListener('popstate', onUrlMaybeChanged);
+    window.addEventListener('hashchange', onUrlMaybeChanged);
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!message || typeof message !== 'object' || !('type' in message)) {
         return;
@@ -86,6 +106,12 @@ export default defineContentScript({
       }
 
       if (msg.type === 'CLOSE_UI') {
+        removeUi();
+        sendResponse({ ok: true });
+        return;
+      }
+
+      if (msg.type === 'BRIEF_RESET') {
         removeUi();
         sendResponse({ ok: true });
         return;

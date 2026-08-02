@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
 import { PlayIcon } from './TransportIcons';
+import { samePageUrl } from '../utils/briefState';
 import { hasLlmAuth, resolveLlmAuth } from '../utils/auth';
 import { getSettings } from '../utils/storage';
 import type {
@@ -81,6 +82,16 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const hasPlayer = Boolean(result && playerAuth);
 
   useEffect(() => {
+    const pageUrl = location.href;
+
+    const resetLocalBrief = () => {
+      setResult(null);
+      setPhase('idle');
+      setError('');
+      setExtracting(false);
+      setNarrating(false);
+    };
+
     void (async () => {
       const loaded = await getSettings();
       setSettings(loaded);
@@ -88,18 +99,28 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       const state = (await browser.runtime.sendMessage({
         type: 'GET_BRIEF_STATE',
       })) as BriefStateResponse;
-      setPhase(state.progress.phase);
-      setExtracting(state.running);
-      if (state.result) {
-        setResult(state.result);
+      const matched =
+        state.result && samePageUrl(state.result.source.url, pageUrl)
+          ? state.result
+          : null;
+      setPhase(matched ? state.progress.phase : 'idle');
+      setExtracting(Boolean(matched && state.running));
+      if (matched) {
+        setResult(matched);
         if (state.progress.phase === 'generating_audio') {
           setNarrating(true);
           setStreamKey((k) => k + 1);
         }
+      } else {
+        setResult(null);
       }
     })();
 
     const onMessage = (message: ExtensionMessage) => {
+      if (message.type === 'BRIEF_RESET') {
+        resetLocalBrief();
+        return;
+      }
       if (message.type === 'BRIEF_PROGRESS') {
         if (
           message.progress.phase === 'generating_audio' &&
@@ -120,6 +141,9 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         }
       }
       if (message.type === 'BRIEF_SCRIPT_READY') {
+        if (!samePageUrl(message.result.source.url, location.href)) {
+          return;
+        }
         setResult(message.result);
         setPhase('generating_audio');
         setExtracting(false);
