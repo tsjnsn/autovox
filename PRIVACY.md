@@ -21,7 +21,7 @@ Settings (OpenRouter connection, optional OpenAI API key, voice, report length) 
 
 ## Permissions
 
-- **activeTab / scripting / `<all_urls>`:** extract article content from the page you brief and inject the on-page player overlay.
+- **activeTab / scripting:** temporary access to the tab you invoke Autovox on (toolbar click) so Autovox can inject the overlay and extract article text. Autovox does not request persistent access to all websites.
 - **storage:** save your settings on this profile.
 - **identity:** OpenRouter OAuth connect flow.
 - **Host access to `openrouter.ai` and `api.openai.com`:** call those APIs from the extension.

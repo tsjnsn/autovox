@@ -50,6 +50,8 @@ See [PRIVACY.md](./PRIVACY.md).
 
 API keys and OpenRouter credentials stay in `chrome.storage.local` on your profile. Page text is sent only to the AI provider you configure. Autovox has no backend.
 
+Page access uses `activeTab` + `scripting` when you click the toolbar icon — not a persistent `<all_urls>` host permission. Declared hosts are only OpenRouter and OpenAI.
+
 ## Publishing (Chrome Web Store)
 
 First listing must be created manually in the [Chrome Web Store Developer Dashboard](https://chrome.google.com/webstore/developer/dashboard):
