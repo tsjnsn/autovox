@@ -4,12 +4,7 @@ Thanks for helping improve Autovox.
 
 ## Setup
 
-```bash
-pnpm install
-pnpm dev
-```
-
-Load the unpacked extension from `.output/chrome-mv3-dev` in `chrome://extensions` (Developer mode on).
+See [docs/development.md](docs/development.md).
 
 ## Checks before a PR
 
@@ -26,6 +21,6 @@ CI runs the same compile + build steps on every push and pull request to `main`.
 - Prefer small, focused PRs.
 - **Never paste API keys, OpenRouter tokens, or `.env.submit` contents into issues or PRs.**
 
-## Auth for local testing
+## Publishing
 
-Use **Connect with OpenRouter** in Options, or paste an OpenAI API key as fallback. Keys stay in `chrome.storage.local` on your profile.
+Chrome Web Store releases are documented in [docs/publishing.md](docs/publishing.md). Listing assets live under [`store/`](store/).

@@ -33,7 +33,8 @@ jobs:
 
       - name: Submit to Chrome Web Store
         env:
-          CHROME_EXTENSION_ID: ${{ secrets.CHROME_EXTENSION_ID }}
+          # Public listing ID: https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda
+          CHROME_EXTENSION_ID: aodlbiejdiibbpemagfngbdhaappejda
           CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
           CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
           CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
