@@ -1,19 +1,15 @@
-name: Release Chrome
+name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: Validate store credentials without uploading
-        type: boolean
-        default: true
-      skip_review:
-        description: Upload as draft without submitting for review
-        type: boolean
-        default: false
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
 
 jobs:
-  submit:
+  release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -28,8 +24,27 @@ jobs:
       - name: Install dependencies
         run: pnpm install
 
+      - name: Typecheck
+        run: pnpm compile
+
       - name: Zip Chrome extension
         run: pnpm zip
+
+      - name: Assert package version matches tag
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          EXPECTED="${TAG#v}"
+          ACTUAL="$(node -p "require('./package.json').version")"
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "package.json version ($ACTUAL) does not match tag ($TAG)"
+            exit 1
+          fi
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: .output/*-chrome.zip
+          generate_release_notes: true
 
       - name: Submit to Chrome Web Store
         env:
@@ -38,10 +53,4 @@ jobs:
           CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
           CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
           CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
-          CHROME_SKIP_SUBMIT_REVIEW: ${{ inputs.skip_review }}
-        run: |
-          ARGS=(--chrome-zip .output/*-chrome.zip)
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            ARGS+=(--dry-run)
-          fi
-          pnpm wxt submit "${ARGS[@]}"
+        run: pnpm wxt submit --chrome-zip .output/*-chrome.zip
