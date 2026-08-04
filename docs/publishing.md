@@ -8,6 +8,8 @@ Listing assets and copy live in [`store/`](../store/) (vendored from the publish
 
 Publishing authenticates with a **Google Cloud service account**, not the older OAuth refresh-token flow. Service account tokens don't expire, so there's nothing to re-mint between releases.
 
+Service-account auth requires the v2 Chrome Web Store API, selected with `CHROME_API_VERSION: v2` (set directly in the workflows). Without it the tooling defaults to v1.1 and demands an OAuth client ID, secret, and refresh token.
+
 Add these repository secrets (one-time):
 
 - `CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL` — `client_email` from the exported JSON key

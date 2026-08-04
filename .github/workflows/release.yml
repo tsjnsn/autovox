@@ -45,6 +45,8 @@ jobs:
         env:
           # Public listing ID: https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda
           CHROME_EXTENSION_ID: aodlbiejdiibbpemagfngbdhaappejda
+          # v2 selects service-account auth; v1.1 (the default) requires an OAuth refresh token
+          CHROME_API_VERSION: v2
           CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
           CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL: ${{ secrets.CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL }}
           CHROME_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.CHROME_SERVICE_ACCOUNT_PRIVATE_KEY }}
