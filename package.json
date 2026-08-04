@@ -14,6 +14,7 @@
     "zip": "wxt zip",
     "zip:firefox": "wxt zip -b firefox",
     "submit:chrome": "wxt submit --chrome-zip .output/*-chrome.zip",
+    "release": "tsx scripts/release.ts",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare"
   },
