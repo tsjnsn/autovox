@@ -45,7 +45,13 @@ That bumps `version` in [`package.json`](../package.json), commits, tags `v0.1.1
 1. Typechecks and zips the Chrome extension
 2. Asserts `package.json` version matches the tag
 3. Creates a GitHub Release with the zip attached
-4. Submits the zip to the Chrome Web Store for review
+4. Uploads the zip to the Chrome Web Store as a **draft**
+
+### Submitting for review
+
+CI stops after the upload (`CHROME_SKIP_SUBMIT_REVIEW`), so a green release run does **not** mean the update was submitted, and nothing reaches users until you act. This leaves room to update listing copy or screenshots so they go out with the new package.
+
+To ship: open the [Developer Dashboard](https://chrome.google.com/webstore/developer/dashboard), make any listing edits, then click **Submit for review**. Google's review still applies as normal — the workflow never bypasses it.
 
 ## Credential dry-run
 
