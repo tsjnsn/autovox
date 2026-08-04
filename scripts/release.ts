@@ -56,7 +56,9 @@ writeFileSync(packagePath, `${JSON.stringify(pkg, null, 2)}\n`, 'utf8');
 
 run('git', ['add', 'package.json']);
 run('git', ['commit', '-m', `Release ${tag}`]);
-run('git', ['tag', tag]);
+// Must be annotated: `git push --follow-tags` silently ignores lightweight
+// tags, which pushes the version bump without ever triggering the release.
+run('git', ['tag', '-a', tag, '-m', `Release ${tag}`]);
 run('git', ['push', 'origin', 'main', '--follow-tags']);
 
 console.log(`Released ${tag}. GitHub Actions will build, publish the GitHub Release, and submit to the Chrome Web Store.`);
