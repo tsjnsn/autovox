@@ -1,0 +1,30 @@
+name: Release Chrome (dry-run)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/setup@v1
+        with:
+          runtime: node@22
+          cache: true
+
+      - name: Zip Chrome extension
+        run: pnpm zip
+
+      - name: Validate Chrome Web Store credentials
+        env:
+          # Public listing ID: https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda
+          CHROME_EXTENSION_ID: aodlbiejdiibbpemagfngbdhaappejda
+          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
+          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
+          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+        run: pnpm wxt submit --chrome-zip .output/*-chrome.zip --dry-run
