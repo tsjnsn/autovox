@@ -6,15 +6,29 @@ Listing assets and copy live in [`store/`](../store/) (vendored from the publish
 
 ## GitHub Actions secrets
 
+Publishing authenticates with a **Google Cloud service account**, not the older OAuth refresh-token flow. Service account tokens don't expire, so there's nothing to re-mint between releases.
+
 Add these repository secrets (one-time):
 
-- `CHROME_CLIENT_ID`
-- `CHROME_CLIENT_SECRET`
-- `CHROME_REFRESH_TOKEN`
+- `CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL` — `client_email` from the exported JSON key
+- `CHROME_SERVICE_ACCOUNT_PRIVATE_KEY` — `private_key` from the same key, full PEM including the `-----BEGIN/END PRIVATE KEY-----` lines
+- `CHROME_PUBLISHER_ID` — from the Developer Dashboard URL (`.../developer/dashboard/<publisherId>`); required because the service-account path uses the v2 API, whose resource name is `publishers/{publisherId}/items/{extensionId}`
+
+```bash
+jq -r .client_email key.json | gh secret set CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL
+jq -r .private_key  key.json | gh secret set CHROME_SERVICE_ACCOUNT_PRIVATE_KEY
+gh secret set CHROME_PUBLISHER_ID
+```
 
 The extension ID is public and hardcoded in the release workflows as `aodlbiejdiibbpemagfngbdhaappejda`.
 
-Generate local credentials with `pnpm wxt submit init`, or `npx chrome-webstore-upload-keys` if the OAuth out-of-band refresh-token flow fails. Never commit `.env.submit`.
+### One-time setup
+
+1. Create a service account in Google Cloud and export a JSON key.
+2. Enable the **Chrome Web Store API** in that same Cloud project.
+3. Link the service account under Developer Dashboard → Settings → Service account.
+
+For local submits, put the same three variables in `.env.submit`. Never commit it.
 
 ## Cut a release
 
@@ -33,7 +47,7 @@ That bumps `version` in [`package.json`](../package.json), commits, tags `v0.1.1
 
 ## Credential dry-run
 
-Run **Release Chrome (dry-run)** (`workflow_dispatch`) to validate store OAuth secrets without uploading or creating a GitHub Release.
+Run **Release Chrome (dry-run)** (`workflow_dispatch`) to validate the store service-account secrets without uploading or creating a GitHub Release.
 
 ## Local submit
 

@@ -24,7 +24,7 @@ jobs:
         env:
           # Public listing ID: https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda
           CHROME_EXTENSION_ID: aodlbiejdiibbpemagfngbdhaappejda
-          CHROME_CLIENT_ID: ${{ secrets.CHROME_CLIENT_ID }}
-          CHROME_CLIENT_SECRET: ${{ secrets.CHROME_CLIENT_SECRET }}
-          CHROME_REFRESH_TOKEN: ${{ secrets.CHROME_REFRESH_TOKEN }}
+          CHROME_PUBLISHER_ID: ${{ secrets.CHROME_PUBLISHER_ID }}
+          CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL: ${{ secrets.CHROME_SERVICE_ACCOUNT_CLIENT_EMAIL }}
+          CHROME_SERVICE_ACCOUNT_PRIVATE_KEY: ${{ secrets.CHROME_SERVICE_ACCOUNT_PRIVATE_KEY }}
         run: pnpm wxt submit --chrome-zip .output/*-chrome.zip --dry-run
