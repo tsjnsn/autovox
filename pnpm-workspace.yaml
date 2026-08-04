@@ -1,0 +1,3 @@
+# pnpm v11 reads project settings from this file (not package.json#pnpm).
+allowBuilds:
+  esbuild: true

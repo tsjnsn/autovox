@@ -1,5 +1,7 @@
 # Development
 
+Requires [pnpm](https://pnpm.io/) 11 (`packageManager` in `package.json`; enable via Corepack: `corepack enable`). Project settings live in [`pnpm-workspace.yaml`](../pnpm-workspace.yaml).
+
 ```bash
 pnpm install
 pnpm dev
