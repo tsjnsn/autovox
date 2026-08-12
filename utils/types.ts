@@ -1,3 +1,16 @@
+import type { OutputLanguage } from './languages';
+import {
+  coerceOutputLanguage,
+  DEFAULT_OUTPUT_LANGUAGE,
+} from './languages';
+
+export type { OutputLanguage };
+export {
+  coerceOutputLanguage,
+  DEFAULT_OUTPUT_LANGUAGE,
+  OUTPUT_LANGUAGES,
+} from './languages';
+
 export type ReportLength = 'short' | 'standard' | 'deep';
 
 /** Voices supported by gpt-audio-mini (Chat Completions audio). */
@@ -21,6 +34,8 @@ export interface Settings {
   openRouterApiKey: string;
   voice: VoiceId;
   reportLength: ReportLength;
+  /** Target language for the news report and narration. */
+  outputLanguage: OutputLanguage;
 }
 
 export interface ExtractedArticle {
@@ -102,6 +117,7 @@ export const DEFAULT_SETTINGS: Settings = {
   openRouterApiKey: '',
   voice: 'sage',
   reportLength: 'standard',
+  outputLanguage: DEFAULT_OUTPUT_LANGUAGE,
 };
 
 const VOICE_IDS = new Set<string>(VOICES.map((v) => v.id));

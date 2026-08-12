@@ -7,13 +7,14 @@ import {
   PcmStreamPlayer,
 } from '../utils/pcmPlayer';
 import { buildTtsChunks, streamSegmentPcm } from '../utils/tts';
-import type { NewsReportScript, VoiceId } from '../utils/types';
+import type { NewsReportScript, OutputLanguage, VoiceId } from '../utils/types';
 import { PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
 
 interface StreamingPlayerProps {
   script: NewsReportScript;
   auth: LlmAuth;
   voice: VoiceId;
+  outputLanguage: OutputLanguage;
   autoPlay?: boolean;
   onPlaying?: () => void;
   onDone?: () => void;
@@ -42,6 +43,7 @@ export function StreamingPlayer({
   script,
   auth,
   voice,
+  outputLanguage,
   autoPlay = true,
   onPlaying,
   onDone,
@@ -76,9 +78,11 @@ export function StreamingPlayer({
   const scriptRef = useRef(script);
   const authRef = useRef(auth);
   const voiceRef = useRef(voice);
+  const outputLanguageRef = useRef(outputLanguage);
   scriptRef.current = script;
   authRef.current = auth;
   voiceRef.current = voice;
+  outputLanguageRef.current = outputLanguage;
 
   const estimatedSeconds = Math.max(1, script.estimatedSeconds || 120);
 
@@ -310,6 +314,7 @@ export function StreamingPlayer({
         for await (const chunk of streamSegmentPcm({
           auth: authRef.current,
           voice: voiceRef.current,
+          outputLanguage: outputLanguageRef.current,
           text,
           signal: abort.signal,
         })) {
@@ -381,7 +386,7 @@ export function StreamingPlayer({
       streamingRef.current = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scriptKey, authKey, voice, autoPlay]);
+  }, [scriptKey, authKey, voice, outputLanguage, autoPlay]);
 
   const toggle = async () => {
     const player = playerRef.current;

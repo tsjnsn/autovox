@@ -1,4 +1,5 @@
 import {
+  coerceOutputLanguage,
   coerceVoice,
   DEFAULT_SETTINGS,
   type Settings,
@@ -17,6 +18,7 @@ export async function getSettings(): Promise<Settings> {
       typeof merged.openRouterApiKey === 'string' ? merged.openRouterApiKey : '',
     voice: coerceVoice(merged.voice),
     reportLength: merged.reportLength ?? DEFAULT_SETTINGS.reportLength,
+    outputLanguage: coerceOutputLanguage(merged.outputLanguage),
   };
 }
 

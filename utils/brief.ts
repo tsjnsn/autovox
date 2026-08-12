@@ -124,6 +124,7 @@ export async function runBriefPipeline(
     auth,
     article,
     reportLength: settings.reportLength,
+    outputLanguage: settings.outputLanguage,
   });
 
   await assertStillOnPage(tabId, expectedUrl, signal);

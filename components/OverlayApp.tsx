@@ -271,6 +271,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               script={result!.script}
               auth={playerAuth!}
               voice={settings!.voice}
+              outputLanguage={settings!.outputLanguage}
               autoPlay
               onPlaying={handlePlaying}
               onDone={handleDone}

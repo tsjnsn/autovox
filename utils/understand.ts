@@ -1,6 +1,7 @@
 import type { LlmAuth } from './auth';
+import { comprehensionLanguageGuidance } from './languages';
 import { createStructuredResponse } from './openai';
-import type { ExtractedArticle, NewsReportScript, ReportLength } from './types';
+import type { ExtractedArticle, NewsReportScript, OutputLanguage, ReportLength } from './types';
 
 /** GPT-5.6 Luna — cost-optimized model for comprehension / rewrite */
 const COMPREHENSION_MODEL = 'gpt-5.6-luna';
@@ -60,6 +61,7 @@ You must demonstrate understanding:
 function buildUserPrompt(
   article: ExtractedArticle,
   reportLength: ReportLength,
+  outputLanguage: OutputLanguage,
 ): string {
   const meta = [
     `Title: ${article.title}`,
@@ -67,6 +69,7 @@ function buildUserPrompt(
     article.siteName ? `Source: ${article.siteName}` : null,
     `URL: ${article.url}`,
     LENGTH_GUIDANCE[reportLength],
+    comprehensionLanguageGuidance(outputLanguage),
   ]
     .filter(Boolean)
     .join('\n');
@@ -85,12 +88,17 @@ export async function understandArticle(options: {
   auth: LlmAuth;
   article: ExtractedArticle;
   reportLength: ReportLength;
+  outputLanguage: OutputLanguage;
 }): Promise<NewsReportScript> {
   const content = await createStructuredResponse({
     auth: options.auth,
     model: COMPREHENSION_MODEL,
     system: SYSTEM_PROMPT,
-    user: buildUserPrompt(options.article, options.reportLength),
+    user: buildUserPrompt(
+      options.article,
+      options.reportLength,
+      options.outputLanguage,
+    ),
     reasoningEffort: 'medium',
     jsonSchema: {
       name: newsReportSchema.name,

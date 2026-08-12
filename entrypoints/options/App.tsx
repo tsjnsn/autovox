@@ -3,7 +3,9 @@ import { connectOpenRouter } from '../../utils/connect';
 import { getSettings, saveSettings } from '../../utils/storage';
 import {
   DEFAULT_SETTINGS,
+  OUTPUT_LANGUAGES,
   VOICES,
+  type OutputLanguage,
   type ReportLength,
   type Settings,
   type VoiceId,
@@ -141,6 +143,30 @@ export default function App() {
           </select>
           <p className="hint">
             Voices for gpt-audio-mini. Sage is a solid news-anchor default.
+          </p>
+        </label>
+
+        <label>
+          Output language
+          <select
+            value={settings.outputLanguage}
+            onChange={(e) =>
+              setSettings((s) => ({
+                ...s,
+                outputLanguage: e.target.value as OutputLanguage,
+              }))
+            }
+          >
+            {OUTPUT_LANGUAGES.map((lang) => (
+              <option key={lang.code} value={lang.code}>
+                {lang.label}
+              </option>
+            ))}
+          </select>
+          <p className="hint">
+            Auto matches the article&apos;s language. Choose a language to
+            translate the report and narration. gpt-audio-mini supports the
+            languages listed here; voices are English-optimized.
           </p>
         </label>
 

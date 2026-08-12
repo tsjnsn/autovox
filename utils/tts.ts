@@ -1,6 +1,7 @@
 import type { LlmAuth } from './auth';
+import { ttsLanguageInstruction } from './languages';
 import { streamAudioChatPcm } from './openai';
-import type { NewsReportScript, VoiceId } from './types';
+import type { NewsReportScript, OutputLanguage, VoiceId } from './types';
 import { scriptToSpokenText } from './understand';
 
 /** Chat Completions audio model for spoken narration */
@@ -8,11 +9,17 @@ export const TTS_MODEL = 'gpt-audio-mini';
 
 const MAX_CHARS = 2800;
 
-export const NEWS_ANCHOR_INSTRUCTIONS = `You are a calm, clear broadcast news anchor.
+const NEWS_ANCHOR_BASE = `You are a calm, clear broadcast news anchor.
 Read the user's script aloud verbatim — every word, in order.
 Do not greet, summarize, paraphrase, add commentary, or skip lines.
 Use steady pacing and a professional news tone.
 Speak only the script text.`;
+
+export function buildNewsAnchorInstructions(
+  outputLanguage: OutputLanguage,
+): string {
+  return `${NEWS_ANCHOR_BASE}\n${ttsLanguageInstruction(outputLanguage)}`;
+}
 
 function chunkText(text: string, maxChars = MAX_CHARS): string[] {
   const normalized = text.replace(/\r\n/g, '\n').trim();
@@ -76,6 +83,7 @@ export function streamSegmentPcm(options: {
   auth: LlmAuth;
   voice: VoiceId;
   text: string;
+  outputLanguage: OutputLanguage;
   signal?: AbortSignal;
 }): AsyncGenerator<Uint8Array, void, unknown> {
   return streamAudioChatPcm({
@@ -83,7 +91,7 @@ export function streamSegmentPcm(options: {
     model: TTS_MODEL,
     voice: options.voice,
     input: options.text,
-    instructions: NEWS_ANCHOR_INSTRUCTIONS,
+    instructions: buildNewsAnchorInstructions(options.outputLanguage),
     signal: options.signal,
   });
 }
