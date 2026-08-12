@@ -11,7 +11,8 @@ pnpm dev
 2. Enable Developer mode
 3. Load unpacked → `.output/chrome-mv3-dev`
 4. Open **Options** → Connect with OpenRouter (or paste an OpenAI API key)
-5. Open an article → click the extension icon → press **play**
+5. Open an article → click the extension icon → press **play**, or right-click the page → **Vox this page**
+6. In **Options**, set voice, output language, and report length as needed
 
 ## Scripts
 

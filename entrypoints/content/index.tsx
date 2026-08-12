@@ -105,6 +105,21 @@ export default defineContentScript({
         return true;
       }
 
+      if (msg.type === 'OPEN_UI') {
+        void mountUi()
+          .then(() => sendResponse({ ok: true, open: true }))
+          .catch((error: unknown) => {
+            sendResponse({
+              ok: false,
+              error:
+                error instanceof Error
+                  ? error.message
+                  : 'Failed to open overlay',
+            });
+          });
+        return true;
+      }
+
       if (msg.type === 'CLOSE_UI') {
         removeUi();
         sendResponse({ ok: true });

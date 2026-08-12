@@ -8,6 +8,8 @@ import {
 } from '../utils/briefState';
 import type { BriefProgress, ExtensionMessage } from '../utils/types';
 
+const CONTEXT_MENU_VOX_PAGE = 'autovox-vox-page';
+
 /** Abort in-flight briefs when the tab navigates away. */
 const abortByTab = new Map<number, AbortController>();
 
@@ -52,13 +54,145 @@ async function toggleOverlayOnTab(tabId: number): Promise<void> {
   await browser.tabs.sendMessage(tabId, { type: 'TOGGLE_UI' });
 }
 
+async function openOverlayOnTab(tabId: number): Promise<void> {
+  await ensureContentScript(tabId);
+  await browser.tabs.sendMessage(tabId, { type: 'OPEN_UI' });
+}
+
+/**
+ * Start a brief for a tab.
+ * @param force When true (toolbar/play), replace any existing result. When false
+ *   (context menu), skip if already running or a matching brief exists.
+ */
+async function startBriefForTab(
+  tabId: number,
+  options: { force?: boolean } = {},
+): Promise<{ ok: boolean; error?: string; skipped?: boolean }> {
+  const force = options.force ?? false;
+  const pageUrl = await tabPageUrl(tabId);
+  const existing = await getTabBrief(tabId, pageUrl);
+
+  if (existing.running) {
+    return force
+      ? { ok: false, error: 'A briefing is already in progress on this page.' }
+      : { ok: true, skipped: true };
+  }
+
+  if (
+    !force &&
+    existing.result &&
+    sameSourceUrl(existing.result.source.url, pageUrl)
+  ) {
+    return { ok: true, skipped: true };
+  }
+
+  abortTabBrief(tabId);
+  await clearTabBrief(tabId);
+  const controller = new AbortController();
+  abortByTab.set(tabId, controller);
+
+  await setTabProgress(
+    tabId,
+    pageUrl,
+    { phase: 'extracting', message: 'Extracting article' },
+    true,
+  );
+
+  try {
+    await runBriefPipeline(
+      tabId,
+      pageUrl,
+      (progress) => {
+        void setTabProgress(tabId, pageUrl, progress, true);
+        notifyTab(tabId, { type: 'BRIEF_PROGRESS', progress });
+      },
+      controller.signal,
+    );
+    if (abortByTab.get(tabId) === controller) {
+      abortByTab.delete(tabId);
+    }
+    await setTabProgress(
+      tabId,
+      pageUrl,
+      {
+        phase: 'generating_audio',
+        message: 'Generating audio',
+      },
+      false,
+    );
+    return { ok: true };
+  } catch (error) {
+    if (abortByTab.get(tabId) === controller) {
+      abortByTab.delete(tabId);
+    }
+    if (isAbortError(error)) {
+      await clearTabBrief(tabId);
+      notifyTab(tabId, { type: 'BRIEF_RESET' });
+      return { ok: false, error: 'Briefing aborted' };
+    }
+    const errorMessage =
+      error instanceof Error ? error.message : 'Briefing failed';
+    await setTabProgress(
+      tabId,
+      pageUrl,
+      {
+        phase: 'error',
+        message: 'Error',
+        detail: errorMessage,
+      },
+      false,
+    );
+    notifyTab(tabId, {
+      type: 'BRIEF_ERROR',
+      error: errorMessage,
+    });
+    return { ok: false, error: errorMessage };
+  }
+}
+
+function registerContextMenus(): void {
+  void browser.contextMenus.removeAll().then(() => {
+    browser.contextMenus.create({
+      id: CONTEXT_MENU_VOX_PAGE,
+      title: 'Vox this page',
+      contexts: ['page'],
+    });
+  });
+}
+
 export default defineBackground(() => {
+  browser.runtime.onInstalled.addListener(() => {
+    registerContextMenus();
+  });
+  // Ensure menu exists after SW restart without reinstall
+  registerContextMenus();
+
+  browser.contextMenus.onClicked.addListener((info, tab) => {
+    if (info.menuItemId !== CONTEXT_MENU_VOX_PAGE) return;
+    const tabId = tab?.id;
+    if (tabId == null) return;
+    const pageUrl = tab?.url;
+
+    void (async () => {
+      try {
+        if (pageUrl) {
+          await clearTabIfUrlChanged(tabId, pageUrl);
+        }
+        await openOverlayOnTab(tabId);
+        // Let OverlayApp mount and attach BRIEF_* listeners
+        await new Promise((resolve) => setTimeout(resolve, 80));
+        await startBriefForTab(tabId, { force: false });
+      } catch (error) {
+        console.error('Failed to vox page from context menu', error);
+      }
+    })();
+  });
+
   browser.action.onClicked.addListener((tab) => {
     void (async () => {
       const tabId = tab.id;
       if (tabId == null) return;
       try {
-        // Only drop state if this tab already navigated to a different URL
         if (tab.url) {
           await clearTabIfUrlChanged(tabId, tab.url);
         }
@@ -95,16 +229,18 @@ export default defineBackground(() => {
         }
         const url = sender.tab?.url ?? (await tabPageUrl(tabId));
         const state = await getTabBrief(tabId, url);
-        // Never hydrate a script that belongs to another URL
         const result =
-          state.result &&
-          sameSourceUrl(state.result.source.url, url)
+          state.result && sameSourceUrl(state.result.source.url, url)
             ? state.result
             : null;
         sendResponse({
-          progress: result ? state.progress : { phase: 'idle', message: 'Idle' },
+          progress: result
+            ? state.progress
+            : state.running
+              ? state.progress
+              : { phase: 'idle', message: 'Idle' },
           result,
-          running: result ? state.running : false,
+          running: state.running,
         });
       })();
       return true;
@@ -157,66 +293,10 @@ export default defineBackground(() => {
           return;
         }
 
-        abortTabBrief(tabId);
-        await clearTabBrief(tabId);
-        const controller = new AbortController();
-        abortByTab.set(tabId, controller);
-
-        await setTabProgress(
-          tabId,
-          pageUrl,
-          { phase: 'extracting', message: 'Extracting article' },
-          true,
-        );
         sendResponse({ ok: true });
-
-        try {
-          await runBriefPipeline(
-            tabId,
-            pageUrl,
-            (progress) => {
-              void setTabProgress(tabId, pageUrl, progress, true);
-              notifyTab(tabId, { type: 'BRIEF_PROGRESS', progress });
-            },
-            controller.signal,
-          );
-          if (abortByTab.get(tabId) === controller) {
-            abortByTab.delete(tabId);
-          }
-          await setTabProgress(
-            tabId,
-            pageUrl,
-            {
-              phase: 'generating_audio',
-              message: 'Generating audio',
-            },
-            false,
-          );
-        } catch (error) {
-          if (abortByTab.get(tabId) === controller) {
-            abortByTab.delete(tabId);
-          }
-          if (isAbortError(error)) {
-            await clearTabBrief(tabId);
-            notifyTab(tabId, { type: 'BRIEF_RESET' });
-            return;
-          }
-          const errorMessage =
-            error instanceof Error ? error.message : 'Briefing failed';
-          await setTabProgress(
-            tabId,
-            pageUrl,
-            {
-              phase: 'error',
-              message: 'Error',
-              detail: errorMessage,
-            },
-            false,
-          );
-          notifyTab(tabId, {
-            type: 'BRIEF_ERROR',
-            error: errorMessage,
-          });
+        const outcome = await startBriefForTab(tabId, { force: true });
+        if (!outcome.ok && outcome.error && outcome.error !== 'Briefing aborted') {
+          // Error already notified to the tab via BRIEF_ERROR
         }
       })();
       return true;

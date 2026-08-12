@@ -17,11 +17,12 @@ Those providers process content under their own terms and privacy policies. Auto
 
 ## What is stored locally
 
-Settings (OpenRouter connection, optional OpenAI API key, voice, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state may be kept in session storage while the extension is active. Nothing is synced to Autovox servers — there are none.
+Settings (OpenRouter connection, optional OpenAI API key, voice, output language, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state may be kept in session storage while the extension is active. Nothing is synced to Autovox servers — there are none.
 
 ## Permissions
 
-- **activeTab / scripting:** temporary access to the tab you invoke Autovox on (toolbar click) so Autovox can inject the overlay and extract article text. Autovox does not request persistent access to all websites.
+- **activeTab / scripting:** temporary access to the tab you invoke Autovox on (toolbar icon or “Vox this page” context menu) so Autovox can inject the overlay and extract article text. Autovox does not request persistent access to all websites.
+- **contextMenus:** adds a “Vox this page” item to the page right-click menu that opens Autovox and starts the spoken brief.
 - **storage:** save your settings on this profile.
 - **identity:** OpenRouter OAuth connect flow.
 - **Host access to `openrouter.ai` and `api.openai.com`:** call those APIs from the extension.

@@ -84,6 +84,7 @@ export type ExtensionMessage =
   | { type: 'PING' }
   | { type: 'EXTRACT_ARTICLE' }
   | { type: 'TOGGLE_UI' }
+  | { type: 'OPEN_UI' }
   | { type: 'CLOSE_UI' }
   | { type: 'OPEN_OPTIONS' }
   | { type: 'START_BRIEF'; tabId?: number }

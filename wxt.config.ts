@@ -14,7 +14,7 @@ export default defineConfig({
     name: 'Autovox',
     description:
       'Digest a web page into a spoken news report—with real comprehension, not just a summary or TTS.',
-    permissions: ['activeTab', 'storage', 'scripting', 'identity'],
+    permissions: ['activeTab', 'storage', 'scripting', 'identity', 'contextMenus'],
     host_permissions: [
       'https://openrouter.ai/*',
       'https://api.openai.com/*',

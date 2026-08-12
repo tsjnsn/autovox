@@ -103,16 +103,22 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         state.result && samePageUrl(state.result.source.url, pageUrl)
           ? state.result
           : null;
-      setPhase(matched ? state.progress.phase : 'idle');
-      setExtracting(Boolean(matched && state.running));
       if (matched) {
+        setPhase(state.progress.phase);
+        setExtracting(Boolean(state.running));
         setResult(matched);
         if (state.progress.phase === 'generating_audio') {
           setNarrating(true);
           setStreamKey((k) => k + 1);
         }
+      } else if (state.running) {
+        setResult(null);
+        setPhase(state.progress.phase);
+        setExtracting(true);
       } else {
         setResult(null);
+        setPhase('idle');
+        setExtracting(false);
       }
     })();
 
