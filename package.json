@@ -2,7 +2,7 @@
   "name": "autovox",
   "description": "Autovox — digest a page into a spoken news report with an LLM comprehension layer.",
   "private": true,
-  "version": "0.1.1",
+  "version": "0.2.0",
   "homepage": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda",
   "packageManager": "pnpm@11.20.0",
   "type": "module",
