@@ -28,6 +28,7 @@ Page access uses `activeTab` + `scripting` when you click the toolbar icon or **
 
 - [Development setup](docs/development.md)
 - [Publishing to the Chrome Web Store](docs/publishing.md)
+- [Flywheel — store analytics → self-improve](docs/flywheel.md)
 - [Contributing](CONTRIBUTING.md)
 - [Design — Wire Meter](DESIGN.md)
 - [Store listing assets](store/listing.md)

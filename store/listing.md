@@ -31,3 +31,5 @@ Assets in this folder were pulled from the live listing (do not invent replaceme
 
 - Declares no data collection
 - Policy: [PRIVACY.md](../PRIVACY.md) on `main`
+
+Public listing metrics (users, rating, reviews) are snapshotted by `pnpm pulse` for the [self-improve flywheel](../docs/flywheel.md). That job reads the store page only — it does not add in-extension analytics.

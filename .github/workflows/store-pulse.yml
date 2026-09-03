@@ -1,0 +1,75 @@
+name: Store pulse
+
+on:
+  schedule:
+    # Morning UTC — CWS public counts move slowly; daily is enough.
+    - cron: '20 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/setup@v1
+        with:
+          runtime: node@22
+          cache: true
+
+      - name: Snapshot Chrome Web Store listing
+        id: pulse
+        run: |
+          set -o pipefail
+          pnpm pulse | tee /tmp/pulse.log
+          if grep -q '^changed=true$' /tmp/pulse.log; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit pulse if metrics changed
+        if: steps.pulse.outputs.changed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add store/pulse.json store/pulse.md
+          git commit -m "Update Chrome Web Store pulse"
+          git push
+
+      - name: Upsert flywheel issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create flywheel \
+            --description "Chrome Web Store pulse / self-improve flywheel" \
+            --color E23B2F \
+            --force
+
+          BODY_FILE="$(mktemp)"
+          {
+            echo "<!-- flywheel-marker -->"
+            echo
+            cat store/pulse.md
+          } > "$BODY_FILE"
+
+          EXISTING="$(gh issue list \
+            --label flywheel \
+            --state open \
+            --search 'Store pulse in:title' \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --body-file "$BODY_FILE"
+            echo "Updated issue #$EXISTING"
+          else
+            gh issue create \
+              --title "Store pulse — Autovox flywheel" \
+              --label flywheel \
+              --body-file "$BODY_FILE"
+          fi
