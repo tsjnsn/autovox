@@ -24,7 +24,8 @@ pnpm dev
 | `pnpm zip` | Chrome Web Store zip |
 | `pnpm submit:chrome` | Submit zip via `wxt submit` (needs `.env.submit` or env vars) |
 | `pnpm release <version>` | Bump version, tag, and push (triggers Release workflow) — see [publishing](publishing.md) |
-| `pnpm pulse` | Snapshot public Chrome Web Store users / rating / reviews into `store/pulse.*` — see [flywheel](flywheel.md) |
+| `pnpm pulse` | Snapshot public Chrome Web Store users / rating / reviews into `store/pulse.*` (acquisition only) |
+| `pnpm money-pulse` | Company spend snapshot from OpenRouter analytics when `OPENROUTER_MANAGEMENT_KEY` is set — see [flywheel](flywheel.md) |
 
 Firefox variants: `pnpm dev:firefox`, `pnpm build:firefox`, `pnpm zip:firefox`.
 

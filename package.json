@@ -16,6 +16,7 @@
     "submit:chrome": "wxt submit --chrome-zip .output/*-chrome.zip",
     "release": "tsx scripts/release.ts",
     "pulse": "tsx scripts/store-pulse.ts",
+    "money-pulse": "tsx scripts/money-pulse.ts",
     "compile": "tsc --noEmit",
     "postinstall": "wxt prepare"
   },

@@ -16,11 +16,11 @@
 - Progressive scrubber (buffered + played), seek within downloaded audio
 - In-memory PCM cache for replay without re-calling TTS
 - OpenRouter OAuth (preferred) or OpenAI API key fallback
-- Voice, output language, and report length in Options only
+- Voice, output language, report length, and a local spend meter in Options only
 
 ## Privacy
 
-See [PRIVACY.md](./PRIVACY.md). API keys stay in `chrome.storage.local` on your profile. Page text is sent only to the AI provider you configure. Autovox has no backend.
+See [PRIVACY.md](./PRIVACY.md). API keys stay in `chrome.storage.local` on your profile. Page text is sent only to the AI provider you configure. Spend per brief (dollars + outcome, no page text) stays on this profile. Autovox has no backend.
 
 Page access uses `activeTab` + `scripting` when you click the toolbar icon or **Vox this page** — not a persistent `<all_urls>` host permission. The `contextMenus` permission is only for that right-click entry.
 
@@ -28,7 +28,7 @@ Page access uses `activeTab` + `scripting` when you click the toolbar icon or **
 
 - [Development setup](docs/development.md)
 - [Publishing to the Chrome Web Store](docs/publishing.md)
-- [Flywheel — store analytics → self-improve](docs/flywheel.md)
+- [Flywheel — money is the data](docs/flywheel.md)
 - [Contributing](CONTRIBUTING.md)
 - [Design — Wire Meter](DESIGN.md)
 - [Store listing assets](store/listing.md)

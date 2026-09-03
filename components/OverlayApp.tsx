@@ -3,8 +3,17 @@ import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
 import { PlayIcon } from './TransportIcons';
 import { samePageUrl } from '../utils/briefState';
-import { hasLlmAuth, resolveLlmAuth } from '../utils/auth';
+import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../utils/auth';
+import {
+  addMoneyLine,
+  finishMoneySession,
+  getMoneyEvent,
+  startMoneySession,
+  usageToLineItem,
+} from '../utils/money';
 import { getSettings } from '../utils/storage';
+import { TTS_MODEL } from '../utils/tts';
+import type { ProviderUsage } from '../utils/usage';
 import type {
   BriefPhase,
   BriefProgress,
@@ -66,6 +75,56 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
   const hasScriptRef = useRef(false);
   hasScriptRef.current = Boolean(result);
+  const moneySessionRef = useRef<string | null>(null);
+  const settingsRef = useRef<Settings | null>(null);
+  settingsRef.current = settings;
+
+  useEffect(() => {
+    moneySessionRef.current = result?.moneySessionId ?? null;
+  }, [result?.moneySessionId]);
+
+  const attachTtsUsage = useCallback(async (usage: ProviderUsage) => {
+    const latest = settingsRef.current;
+    if (!latest) return;
+
+    let auth: LlmAuth;
+    try {
+      auth = resolveLlmAuth(latest);
+    } catch {
+      return;
+    }
+
+    let sessionId = moneySessionRef.current;
+    const existing = sessionId ? await getMoneyEvent(sessionId) : null;
+    if (!existing || existing.outcome !== 'open') {
+      sessionId = await startMoneySession({
+        kind: 'tts_replay',
+        reportLength: latest.reportLength,
+        voice: latest.voice,
+        outputLanguage: latest.outputLanguage,
+        authMode: auth.mode,
+      });
+      moneySessionRef.current = sessionId;
+    }
+    if (!sessionId) return;
+
+    await addMoneyLine(
+      sessionId,
+      usageToLineItem('tts', TTS_MODEL, usage),
+    );
+  }, []);
+
+  const finishTtsSession = useCallback(
+    async (
+      outcome: 'completed' | 'fault',
+      faultStage: 'tts' | 'none' = 'none',
+    ) => {
+      const sessionId = moneySessionRef.current;
+      if (!sessionId) return;
+      await finishMoneySession(sessionId, outcome, faultStage);
+    },
+    [],
+  );
 
   const hasAuth = settings ? hasLlmAuth(settings) : null;
   const busy = extracting || narrating;
@@ -85,6 +144,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     const pageUrl = location.href;
 
     const resetLocalBrief = () => {
+      moneySessionRef.current = null;
       setResult(null);
       setPhase('idle');
       setError('');
@@ -104,6 +164,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           ? state.result
           : null;
       if (matched) {
+        moneySessionRef.current = matched.moneySessionId ?? null;
         setPhase(state.progress.phase);
         setExtracting(Boolean(state.running));
         setResult(matched);
@@ -150,6 +211,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         if (!samePageUrl(message.result.source.url, location.href)) {
           return;
         }
+        moneySessionRef.current = message.result.moneySessionId ?? null;
         setResult(message.result);
         setPhase('generating_audio');
         setExtracting(false);
@@ -211,6 +273,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     }
 
     setError('');
+    moneySessionRef.current = null;
     setResult(null);
     setNarrating(false);
     setExtracting(true);
@@ -229,6 +292,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
   const clearBrief = async () => {
     await browser.runtime.sendMessage({ type: 'CLEAR_BRIEF' });
+    moneySessionRef.current = null;
     setResult(null);
     setPhase('idle');
     setError('');
@@ -244,13 +308,20 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const handleDone = useCallback(() => {
     setPhase('ready');
     setNarrating(false);
-  }, []);
+    void finishTtsSession('completed');
+  }, [finishTtsSession]);
 
   const handleError = useCallback((message: string) => {
     setPhase('error');
     setNarrating(false);
     setError(message);
-  }, []);
+    void finishTtsSession('fault', 'tts');
+  }, [finishTtsSession]);
+
+  const handleUsage = useCallback(
+    (usage: ProviderUsage) => attachTtsUsage(usage),
+    [attachTtsUsage],
+  );
 
   const label =
     hasAuth === false ? 'No auth' : meterLabel(phase, error, extracting);
@@ -282,6 +353,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               onPlaying={handlePlaying}
               onDone={handleDone}
               onError={handleError}
+              onUsage={handleUsage}
             />
             <p className="autovox-source">
               {result!.source.siteName ? `${result!.source.siteName} · ` : ''}

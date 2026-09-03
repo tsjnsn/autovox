@@ -4,15 +4,27 @@ import {
   normalizePageUrl,
   samePageUrl,
   saveTabBriefResult,
+  setTabMoneySession,
 } from './briefState';
+import {
+  addMoneyLine,
+  finishMoneySession,
+  startMoneySession,
+  usageToLineItem,
+} from './money';
 import { getSettings } from './storage';
 import type {
   BriefProgress,
   BriefResult,
   ExtractedArticle,
   ExtensionMessage,
+  NewsReportScript,
 } from './types';
-import { understandArticle } from './understand';
+import {
+  COMPREHENSION_MODEL,
+  UnderstandError,
+  understandArticle,
+} from './understand';
 
 type ProgressFn = (progress: BriefProgress) => void;
 
@@ -92,6 +104,14 @@ export async function runBriefPipeline(
     );
   }
   const auth = resolveLlmAuth(settings);
+  const sessionId = await startMoneySession({
+    kind: 'brief',
+    reportLength: settings.reportLength,
+    voice: settings.voice,
+    outputLanguage: settings.outputLanguage,
+    authMode: auth.mode,
+  });
+  await setTabMoneySession(tabId, expectedUrl, sessionId);
 
   onProgress({
     phase: 'extracting',
@@ -99,13 +119,21 @@ export async function runBriefPipeline(
     detail: 'Pulling the main content from the page…',
   });
 
-  await assertStillOnPage(tabId, expectedUrl, signal);
-  const article = await extractFromTab(tabId);
-  await assertStillOnPage(tabId, expectedUrl, signal);
-
-  // Extracted document must still be the page we started on
-  if (article.url && !samePageUrl(article.url, expectedUrl)) {
-    throw new DOMException('Page changed during briefing', 'AbortError');
+  let article: ExtractedArticle;
+  try {
+    await assertStillOnPage(tabId, expectedUrl, signal);
+    article = await extractFromTab(tabId);
+    await assertStillOnPage(tabId, expectedUrl, signal);
+    if (article.url && !samePageUrl(article.url, expectedUrl)) {
+      throw new DOMException('Page changed during briefing', 'AbortError');
+    }
+  } catch (error) {
+    await finishMoneySession(
+      sessionId,
+      isAbortError(error) ? 'aborted' : 'fault',
+      isAbortError(error) ? 'none' : 'extract',
+    );
+    throw error;
   }
 
   onProgress({
@@ -113,21 +141,40 @@ export async function runBriefPipeline(
     message: 'Understanding the story',
     detail: 'Comprehending facts, context, and stakes…',
   });
-
   onProgress({
     phase: 'writing',
     message: 'Writing news report',
     detail: 'Rewriting into a broadcast-ready script…',
   });
 
-  const script = await understandArticle({
-    auth,
-    article,
-    reportLength: settings.reportLength,
-    outputLanguage: settings.outputLanguage,
-  });
-
-  await assertStillOnPage(tabId, expectedUrl, signal);
+  let script: NewsReportScript;
+  try {
+    const understood = await understandArticle({
+      auth,
+      article,
+      reportLength: settings.reportLength,
+      outputLanguage: settings.outputLanguage,
+    });
+    script = understood.script;
+    await addMoneyLine(
+      sessionId,
+      usageToLineItem('understand', COMPREHENSION_MODEL, understood.usage),
+    );
+    await assertStillOnPage(tabId, expectedUrl, signal);
+  } catch (error) {
+    if (error instanceof UnderstandError) {
+      await addMoneyLine(
+        sessionId,
+        usageToLineItem('understand', COMPREHENSION_MODEL, error.usage),
+      );
+    }
+    await finishMoneySession(
+      sessionId,
+      isAbortError(error) ? 'aborted' : 'fault',
+      isAbortError(error) ? 'none' : 'understand',
+    );
+    throw error;
+  }
 
   const result: BriefResult = {
     source: {
@@ -136,6 +183,7 @@ export async function runBriefPipeline(
       siteName: article.siteName,
     },
     script,
+    moneySessionId: sessionId,
   };
 
   await saveTabBriefResult(tabId, expectedUrl, result);
@@ -150,6 +198,13 @@ export async function runBriefPipeline(
   void browser.tabs.sendMessage(tabId, ready).catch(() => {});
 
   return result;
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  );
 }
 
 export async function resetBrief(tabId: number): Promise<void> {

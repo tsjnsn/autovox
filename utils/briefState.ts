@@ -1,3 +1,4 @@
+import { finishMoneySession } from './money';
 import type { BriefProgress, BriefResult } from './types';
 
 const SESSION_KEY = 'autovoxBriefByTab';
@@ -19,7 +20,12 @@ type PersistedMap = Record<string, PersistedEntry>;
 /** Live progress / running flags — lost when the service worker sleeps. */
 const liveByTab = new Map<
   number,
-  { pageUrl: string; progress: BriefProgress; running: boolean }
+  {
+    pageUrl: string;
+    progress: BriefProgress;
+    running: boolean;
+    moneySessionId?: string;
+  }
 >();
 
 const IDLE: BriefProgress = { phase: 'idle', message: 'Idle' };
@@ -120,10 +126,26 @@ export async function setTabProgress(
   progress: BriefProgress,
   running: boolean,
 ): Promise<void> {
+  const existing = liveByTab.get(tabId);
   liveByTab.set(tabId, {
     pageUrl: normalizePageUrl(pageUrl),
     progress,
     running,
+    moneySessionId: existing?.moneySessionId,
+  });
+}
+
+export async function setTabMoneySession(
+  tabId: number,
+  pageUrl: string,
+  moneySessionId: string,
+): Promise<void> {
+  const existing = liveByTab.get(tabId);
+  liveByTab.set(tabId, {
+    pageUrl: normalizePageUrl(pageUrl),
+    progress: existing?.progress ?? IDLE,
+    running: existing?.running ?? true,
+    moneySessionId,
   });
 }
 
@@ -145,15 +167,22 @@ export async function saveTabBriefResult(
       message: 'Generating audio',
     },
     running: live?.running ?? false,
+    moneySessionId: live?.moneySessionId ?? result.moneySessionId,
   });
 }
 
 export async function clearTabBrief(tabId: number): Promise<void> {
-  liveByTab.delete(tabId);
+  const live = liveByTab.get(tabId);
   const map = await readPersisted();
+  const sessionId =
+    live?.moneySessionId ?? map[tabKey(tabId)]?.result.moneySessionId;
+  liveByTab.delete(tabId);
   if (map[tabKey(tabId)]) {
     delete map[tabKey(tabId)];
     await writePersisted(map);
+  }
+  if (sessionId) {
+    await finishMoneySession(sessionId, 'aborted');
   }
 }
 

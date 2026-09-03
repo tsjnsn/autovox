@@ -17,7 +17,11 @@ Those providers process content under their own terms and privacy policies. Auto
 
 ## What is stored locally
 
-Settings (OpenRouter connection, optional OpenAI API key, voice, output language, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state may be kept in session storage while the extension is active. Nothing is synced to Autovox servers — there are none.
+Settings (OpenRouter connection, optional OpenAI API key, voice, output language, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state may be kept in session storage while the extension is active.
+
+Autovox also keeps a **local spend ledger** on this profile: cost, model, outcome (completed / fault / aborted), report length, voice, and output language. That record does **not** include the page URL, title, or article text. It is not sent to Autovox — there is no Autovox server.
+
+Nothing is synced to Autovox servers — there are none.
 
 ## Permissions
 

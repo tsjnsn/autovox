@@ -1,10 +1,21 @@
 import type { LlmAuth } from './auth';
 import { comprehensionLanguageGuidance } from './languages';
 import { createStructuredResponse } from './openai';
+import type { ProviderUsage } from './usage';
 import type { ExtractedArticle, NewsReportScript, OutputLanguage, ReportLength } from './types';
 
 /** GPT-5.6 Luna — cost-optimized model for comprehension / rewrite */
-const COMPREHENSION_MODEL = 'gpt-5.6-luna';
+export const COMPREHENSION_MODEL = 'gpt-5.6-luna';
+
+export class UnderstandError extends Error {
+  readonly usage: ProviderUsage;
+
+  constructor(message: string, usage: ProviderUsage) {
+    super(message);
+    this.name = 'UnderstandError';
+    this.usage = usage;
+  }
+}
 
 
 const LENGTH_GUIDANCE: Record<ReportLength, string> = {
@@ -89,8 +100,8 @@ export async function understandArticle(options: {
   article: ExtractedArticle;
   reportLength: ReportLength;
   outputLanguage: OutputLanguage;
-}): Promise<NewsReportScript> {
-  const content = await createStructuredResponse({
+}): Promise<{ script: NewsReportScript; usage: ProviderUsage }> {
+  const { text: content, usage } = await createStructuredResponse({
     auth: options.auth,
     model: COMPREHENSION_MODEL,
     system: SYSTEM_PROMPT,
@@ -106,12 +117,14 @@ export async function understandArticle(options: {
     },
   });
 
-
   let parsed: NewsReportScript;
   try {
     parsed = JSON.parse(content) as NewsReportScript;
   } catch {
-    throw new Error('Failed to parse news report from comprehension model');
+    throw new UnderstandError(
+      'Failed to parse news report from comprehension model',
+      usage,
+    );
   }
 
   if (
@@ -120,21 +133,27 @@ export async function understandArticle(options: {
     !Array.isArray(parsed.segments) ||
     parsed.segments.length === 0
   ) {
-    throw new Error('Comprehension model returned an incomplete news report');
+    throw new UnderstandError(
+      'Comprehension model returned an incomplete news report',
+      usage,
+    );
   }
 
   return {
-    headline: parsed.headline.trim(),
-    lede: parsed.lede.trim(),
-    segments: parsed.segments.map((s) => s.trim()).filter(Boolean),
-    estimatedSeconds:
-      typeof parsed.estimatedSeconds === 'number' && parsed.estimatedSeconds > 0
-        ? Math.round(parsed.estimatedSeconds)
-        : Math.round(
-            (parsed.lede.split(/\s+/).length +
-              parsed.segments.join(' ').split(/\s+/).length) /
-              2.4,
-          ),
+    script: {
+      headline: parsed.headline.trim(),
+      lede: parsed.lede.trim(),
+      segments: parsed.segments.map((s) => s.trim()).filter(Boolean),
+      estimatedSeconds:
+        typeof parsed.estimatedSeconds === 'number' && parsed.estimatedSeconds > 0
+          ? Math.round(parsed.estimatedSeconds)
+          : Math.round(
+              (parsed.lede.split(/\s+/).length +
+                parsed.segments.join(' ').split(/\s+/).length) /
+                2.4,
+            ),
+    },
+    usage,
   };
 }
 

@@ -7,6 +7,7 @@ import {
   PcmStreamPlayer,
 } from '../utils/pcmPlayer';
 import { buildTtsChunks, streamSegmentPcm } from '../utils/tts';
+import type { ProviderUsage } from '../utils/usage';
 import type { NewsReportScript, OutputLanguage, VoiceId } from '../utils/types';
 import { PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
 
@@ -19,6 +20,8 @@ interface StreamingPlayerProps {
   onPlaying?: () => void;
   onDone?: () => void;
   onError?: (message: string) => void;
+  /** Fired once per TTS API segment that actually spent. Cache replay does not fire. */
+  onUsage?: (usage: ProviderUsage) => void | Promise<void>;
 }
 
 type TransportPhase = 'loading' | 'playing' | 'paused' | 'ready';
@@ -48,6 +51,7 @@ export function StreamingPlayer({
   onPlaying,
   onDone,
   onError,
+  onUsage,
 }: StreamingPlayerProps) {
   const playerRef = useRef<PcmStreamPlayer | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -69,9 +73,11 @@ export function StreamingPlayer({
   const onPlayingRef = useRef(onPlaying);
   const onDoneRef = useRef(onDone);
   const onErrorRef = useRef(onError);
+  const onUsageRef = useRef(onUsage);
   onPlayingRef.current = onPlaying;
   onDoneRef.current = onDone;
   onErrorRef.current = onError;
+  onUsageRef.current = onUsage;
 
   const scriptKey = `${script.headline}\n${script.lede}\n${script.segments.join('\n')}`;
   const authKey = authCacheKey(auth);
@@ -317,6 +323,7 @@ export function StreamingPlayer({
           outputLanguage: outputLanguageRef.current,
           text,
           signal: abort.signal,
+          onUsage: (usage) => onUsageRef.current?.(usage),
         })) {
           if (abort.signal.aborted || runId !== runIdRef.current) return;
 

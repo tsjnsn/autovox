@@ -25,4 +25,4 @@ CI runs the same compile + build steps on every push and pull request to `main`.
 
 Chrome Web Store releases are documented in [docs/publishing.md](docs/publishing.md). Listing assets live under [`store/`](store/).
 
-Store-listing analytics (not in-extension telemetry) feed the [flywheel](docs/flywheel.md). Run `pnpm pulse` after a listing or review change; the scheduled **Store pulse** workflow keeps `store/pulse.json` current.
+The [flywheel](docs/flywheel.md) is **money** (local spend ledger; later Autovox-owned OpenRouter spend). Store-listing pulse (`pnpm pulse`) is acquisition only. Do not add in-extension product analytics.

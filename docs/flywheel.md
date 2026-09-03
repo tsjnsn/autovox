@@ -1,78 +1,89 @@
-# Autovox flywheel — extension analytics → self-improve
+# Autovox flywheel — money is the data
 
-Autovox has **no backend** and declares **no product telemetry** ([PRIVACY.md](../PRIVACY.md)). The improvement loop therefore uses **extrinsic extension analytics**: public Chrome Web Store listing signals, public reviews, and (optionally) the store-listing metrics Google already shows in the Developer Dashboard.
+A flywheel needs a dataset that compounds. Store-user counts and star ratings are acquisition vanity. The dataset that can improve Autovox is **economic events**: dollars in, outcome out.
 
 ```
-ship Autovox
-    → people find / install / review it on the Chrome Web Store
-    → pnpm pulse snapshots those signals into store/pulse.*
-    → a GitHub issue (label flywheel) plus this file tell an agent what changed
-    → the agent files issues / opens PRs / you ship
-    → the next pulse measures whether it worked
+user spends $ on a brief
+    → Autovox records $ / outcome / model / length / voice  (never page text)
+    → product changes what people keep paying for
+    → more completed briefs, less wasted $
+    → denser money data
 ```
 
-That is the whole flywheel. Do **not** complete it by piping page text or API keys to a third-party analytics SDK — that would break the privacy contract and the CWS data-use declarations.
+Today each brief is paid by the user (BYOK: OpenRouter or a pasted OpenAI key). The ledger still lives **on this browser profile**. Autovox has no backend and does not ingest spend. The schema is the flywheel; sitting on the payment rail is how the company later sees the same events.
 
-## What to connect (and what not to)
+## What is recorded
 
-| Source | What it measures | How Autovox uses it |
+Each brief (and each TTS remount that actually hits the API) writes a money event to `chrome.storage.local` (`autovoxMoneyLedger`):
+
+| Field | Why it is money-data |
+| --- | --- |
+| `costUsd` + line items (`understand`, `tts`) | What the brief cost |
+| `outcome` (`completed` / `fault` / `aborted`) | Whether the dollars produced a listen |
+| `faultStage` (`extract` / `understand` / `tts`) | Where money was wasted |
+| `reportLength`, `voice`, `outputLanguage`, `authMode` | What configuration people pay for |
+
+**Never stored:** URL, title, article text, keys.
+
+OpenRouter responses include `usage.cost`. If a stream omits it, Autovox asks `GET /api/v1/generation?id=`. A pasted OpenAI key usually has tokens but no USD — those events stay `costKnown: false`.
+
+The readout is **Options → Spend**, not the overlay. Cache replay inside an already-open player does not double-count. Closing the overlay and hearing the script again *does* spend TTS again; that is a new event.
+
+## Two layers
+
+| Layer | Dataset | Who can see it |
 | --- | --- | --- |
-| Public listing (`store/pulse.json`) | Approximate users, rating, review count, listed version, public review text | Automated daily snapshot. Safe: already public. |
-| [Developer Dashboard metrics](https://developer.chrome.com/docs/webstore/metrics) | Installs, uninstalls, impressions, weekly users, enabled vs disabled | Human / agent reads the dashboard (or exported CSV). No public API. |
-| CWS-managed listing GA | Store **page** views and listing conversion — not in-extension events | Opt in under **Store listing → Additional metrics**. The public listing blob may expose a `G-` measurement id; treat it as store-page analytics only. |
-| In-extension GA4 / PostHog / Umami | Brief starts, faults, voice picks | **Out of scope.** Would need a host permission, a privacy-policy rewrite, and a CWS data-collection disclosure. |
+| **Money ledger (this is the flywheel)** | $ per brief, waste, completed average | The user, on-device. Company: only after Autovox pays. |
+| **Store pulse (acquisition only)** | Public CWS users / rating / reviews | Anyone. `pnpm pulse` → `store/pulse.*` |
 
-Official CWS publish credentials (`CHROME_SERVICE_ACCOUNT_*`) upload zips. They do **not** return analytics. Connecting “extension analytics” here means the pulse + dashboard, not `wxt submit`.
+Do **not** complete the flywheel with GA4, PostHog, or any in-extension product telemetry. That would break [PRIVACY.md](../PRIVACY.md) and the CWS “no data collection” declaration. Do not put spend on the Wire Meter faceplate ([DESIGN.md](../DESIGN.md)).
 
-## Daily pulse
+## Company pulse (Autovox on the rail)
+
+BYOK means the dollars and the learning go to OpenRouter. Company-level compounding needs Autovox **on the payment rail**:
+
+1. Autovox-owned OpenRouter keys (users no longer paste their own inference key)
+2. An OpenRouter **management key** (inference keys get 403 on analytics)
+3. Optional later: Autovox billing so margin is first-party
+
+When `OPENROUTER_MANAGEMENT_KEY` is set:
+
+```bash
+pnpm money-pulse
+```
+
+queries `POST /api/v1/analytics/query` and writes `store/money-pulse.json`. Without that key the script exits cleanly and records that the company rail is not live. Never commit the management key.
+
+## Store pulse (keep, but do not steer product by it)
 
 ```bash
 pnpm pulse
 ```
 
-Fetches the live listing and reviews pages, writes:
-
-- [`store/pulse.json`](../store/pulse.json) — machine-readable snapshot + deltas vs the last run
-- [`store/pulse.md`](../store/pulse.md) — the same digest used as the GitHub issue body
-
-The **Store pulse** workflow runs this on a schedule and on `workflow_dispatch`. When the snapshot changes it commits the files on `main` and upserts a GitHub issue labeled `flywheel`.
+Still snapshots the public listing into [`store/pulse.json`](../store/pulse.json). Use it for discovery and listing conversion — not for “what to build next.” What to build next is: lower `$ wasted on faults`, lower `$ per completed brief`, keep configurations people actually pay for.
 
 ## Close the loop with a Cursor Automation
 
 Create a scheduled or issue-triggered [Cursor Automation](https://cursor.com/automations) on `tsjnsn/autovox` with a prompt like:
 
 ```
-You are closing Autovox's flywheel. Read docs/flywheel.md, DESIGN.md, PRIVACY.md,
-and the latest store/pulse.json + store/pulse.md (or the open GitHub issue labeled
-flywheel).
+You are closing Autovox's money flywheel. Read docs/flywheel.md, DESIGN.md,
+PRIVACY.md, and store/money-pulse.json if it exists. Store pulse
+(store/pulse.*) is acquisition only.
 
 Rules:
-- Do not add in-extension analytics, new host permissions, or a backend.
+- Money is the data. Optimize wasted $ on faults and $ per completed brief.
+- Do not add in-extension analytics, new host permissions, or a backend
+  unless the change is Autovox sitting on the OpenRouter payment rail.
 - Prefer borrowed media UX over dashboard chrome (DESIGN.md).
-- If users are low and reviews are empty, improve listing conversion
-  (store/listing.md copy, screenshots) — not new overlay controls.
-- If there are new ≤3★ reviews, file one GitHub issue per distinct product
-  problem, then implement the highest-leverage fix as a PR.
-- If user count or rating dropped, investigate uninstall / fault paths
-  (extract → understand → TTS) before adding features.
-- Keep the overlay player-first. Preferences stay in Options.
+- Spend belongs in Options, never on the overlay faceplate.
+- If users are low and reviews are empty, listing conversion is an
+  acquisition task — do not confuse it with the money flywheel.
+- Keep page text off every spend record.
 
-Ship a small PR. Update suggestedActions commentary in the flywheel issue.
+Ship a small PR. Say what dollar outcome you expect.
 ```
-
-Point the automation at this repo, the `flywheel` label, and (optionally) a weekly cron. The pulse issue is the inbox; the agent is the actuator.
-
-## Manual dashboard checks (richer than the public count)
-
-Once a week, or before a release:
-
-1. [Developer Dashboard](https://chrome.google.com/webstore/developer/dashboard) → Autovox → **Analytics**
-2. Note installs, uninstalls, impressions, and weekly users by country / version
-3. If you opted into listing GA, open that GA4 property for store-page conversion
-4. Paste any insight that is not already in `store/pulse.md` as a comment on the flywheel issue
-
-Public `userCount` is a coarse bucket. Dashboard weekly users and uninstalls are the numbers that decide whether a release helped.
 
 ## First-run reality (2026-09)
 
-The listing is live at version 0.2.0 with a handful of public users and **no ratings**. Until reviews exist, the flywheel’s job is discovery and listing conversion — not a product-analytics warehouse.
+The listing is live at version 0.2.0 with a handful of public users. Until Autovox owns spend, the flywheel’s job is to **record every dollar this profile already pays** so the next product change has a cost function. Store counts will not tell you if a model, voice, or length change was worth it.

@@ -1,5 +1,11 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { connectOpenRouter } from '../../utils/connect';
+import {
+  formatUsd,
+  MONEY_LEDGER_KEY,
+  summarizeMoneyLedger,
+  type MoneySummary,
+} from '../../utils/money';
 import { getSettings, saveSettings } from '../../utils/storage';
 import {
   DEFAULT_SETTINGS,
@@ -22,11 +28,28 @@ export default function App() {
   const [status, setStatus] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState('');
+  const [spend, setSpend] = useState<MoneySummary | null>(null);
 
   const connected = Boolean(settings.openRouterApiKey.trim());
 
   useEffect(() => {
     void getSettings().then(setSettings);
+  }, []);
+
+  useEffect(() => {
+    const loadSpend = () => {
+      void summarizeMoneyLedger().then(setSpend);
+    };
+    loadSpend();
+    const onChanged: Parameters<
+      typeof browser.storage.onChanged.addListener
+    >[0] = (changes, area) => {
+      if (area === 'local' && changes[MONEY_LEDGER_KEY]) {
+        loadSpend();
+      }
+    };
+    browser.storage.onChanged.addListener(onChanged);
+    return () => browser.storage.onChanged.removeListener(onChanged);
   }, []);
 
   const flash = (message: string) => {
@@ -192,6 +215,42 @@ export default function App() {
           <span className="status">{status}</span>
         </div>
       </form>
+
+      <section className="spend" aria-labelledby="spend-title">
+        <h2 id="spend-title" className="spend__title">
+          Spend
+        </h2>
+        <p className="spend__hero">
+          {spend
+            ? `${formatUsd(spend.totalUsd)} across ${spend.briefCount} brief${spend.briefCount === 1 ? '' : 's'}`
+            : 'This profile'}
+        </p>
+        <dl className="spend__meter">
+          <div>
+            <dt>Faults wasted</dt>
+            <dd>{spend ? formatUsd(spend.wastedUsd) : '—'}</dd>
+          </div>
+          <div>
+            <dt>Completed avg</dt>
+            <dd>
+              {spend?.averageCompletedUsd != null
+                ? formatUsd(spend.averageCompletedUsd)
+                : '—'}
+            </dd>
+          </div>
+          <div>
+            <dt>Last 7 days</dt>
+            <dd>{spend ? formatUsd(spend.last7dUsd) : '—'}</dd>
+          </div>
+        </dl>
+        <p className="hint">
+          Dollars on this profile only — Autovox never sees them. OpenRouter
+          reports cost; a pasted OpenAI key usually cannot.
+          {spend && spend.costUnknownCount > 0
+            ? ` ${spend.costUnknownCount} event${spend.costUnknownCount === 1 ? '' : 's'} have no USD.`
+            : ''}
+        </p>
+      </section>
     </div>
   );
 }

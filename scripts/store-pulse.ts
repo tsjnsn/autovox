@@ -413,7 +413,7 @@ Fetched **${pulse.fetchedAt}** from the public [Chrome Web Store listing](${puls
 | Category | ${pulse.category ?? 'unknown'} | |
 | Size | ${pulse.size ?? 'unknown'} | |
 
-This snapshot is **extrinsic** (store listing + public reviews). Autovox still has no backend and does not send product telemetry. See [docs/flywheel.md](../docs/flywheel.md).
+This snapshot is **acquisition only** (store listing + public reviews). The flywheel dataset is money — see [docs/flywheel.md](../docs/flywheel.md). Autovox still has no backend and does not send product telemetry.
 
 ${pulse.storeGaMeasurementId ? `CWS listing GA measurement id (store-page traffic, not in-extension events): \`${pulse.storeGaMeasurementId}\`.\n` : ''}
 ## Reviews

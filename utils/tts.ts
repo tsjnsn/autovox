@@ -1,6 +1,7 @@
 import type { LlmAuth } from './auth';
 import { ttsLanguageInstruction } from './languages';
 import { streamAudioChatPcm } from './openai';
+import type { ProviderUsage } from './usage';
 import type { NewsReportScript, OutputLanguage, VoiceId } from './types';
 import { scriptToSpokenText } from './understand';
 
@@ -85,6 +86,7 @@ export function streamSegmentPcm(options: {
   text: string;
   outputLanguage: OutputLanguage;
   signal?: AbortSignal;
+  onUsage?: (usage: ProviderUsage) => void | Promise<void>;
 }): AsyncGenerator<Uint8Array, void, unknown> {
   return streamAudioChatPcm({
     auth: options.auth,
@@ -93,5 +95,6 @@ export function streamSegmentPcm(options: {
     input: options.text,
     instructions: buildNewsAnchorInstructions(options.outputLanguage),
     signal: options.signal,
+    onUsage: options.onUsage,
   });
 }

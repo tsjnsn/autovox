@@ -78,6 +78,8 @@ export interface BriefResult {
     siteName: string | null;
   };
   script: NewsReportScript;
+  /** Local spend session — no page content is attached to the ledger. */
+  moneySessionId?: string;
 }
 
 export type ExtensionMessage =
