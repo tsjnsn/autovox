@@ -66,10 +66,12 @@ export const ensure = mutation({
         grantedCredits: balance.grantedCredits,
         consumedCredits: balance.consumedCredits,
         reservedCredits: balance.reservedCredits,
-        availableCredits:
+        availableCredits: Math.max(
+          0,
           balance.grantedCredits -
           balance.consumedCredits -
-          balance.reservedCredits,
+            balance.reservedCredits,
+        ),
       };
     }
 
@@ -91,10 +93,12 @@ export const ensure = mutation({
       grantedCredits: balance.grantedCredits,
       consumedCredits: balance.consumedCredits,
       reservedCredits: balance.reservedCredits,
-      availableCredits:
+      availableCredits: Math.max(
+        0,
         balance.grantedCredits -
         balance.consumedCredits -
-        balance.reservedCredits,
+          balance.reservedCredits,
+      ),
     };
   },
 });
@@ -118,10 +122,12 @@ export const getStatus = authedQuery({
       grantedCredits: balance.grantedCredits,
       consumedCredits: balance.consumedCredits,
       reservedCredits: balance.reservedCredits,
-      availableCredits:
+      availableCredits: Math.max(
+        0,
         balance.grantedCredits -
         balance.consumedCredits -
-        balance.reservedCredits,
+          balance.reservedCredits,
+      ),
     };
   },
 });

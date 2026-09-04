@@ -198,6 +198,10 @@ export function StreamingPlayer({
         bufferedSecondsRef.current,
       );
       setPosition(endAt);
+      if (!cacheCompleteRef.current || streamingRef.current) {
+        setTransportPhase('loading');
+        return;
+      }
       setTransportPhase('ready');
       terminalRef.current = true;
       onDoneRef.current?.(endAt);
@@ -279,7 +283,12 @@ export function StreamingPlayer({
           );
           return;
         }
-        if (player.ended && phaseRef.current !== 'playing') {
+        if (
+          player.ended &&
+          cacheCompleteRef.current &&
+          !streamingRef.current &&
+          phaseRef.current !== 'playing'
+        ) {
           setPosition(player.duration || buffered);
           setTransportPhase('ready');
           terminalRef.current = true;
@@ -405,7 +414,6 @@ export function StreamingPlayer({
       runIdRef.current += 1;
       streamingRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scriptKey, authKey, voice, outputLanguage, autoPlay]);
 
   const toggle = async () => {

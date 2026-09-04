@@ -10,7 +10,7 @@ user spends $ on a brief
     → denser money data
 ```
 
-Today each brief is paid by the user (BYOK: OpenRouter or a pasted OpenAI key). The ledger still lives **on this browser profile**. Autovox has no backend and does not ingest spend. The schema is the flywheel; sitting on the payment rail is how the company later sees the same events.
+BYOK remains available, but it cannot make Autovox money. Managed listening adds the company rail: trial credits, Stripe purchases, Autovox-funded OpenRouter sessions, and authoritative provider-cost reconciliation.
 
 ## What is recorded
 
@@ -33,28 +33,50 @@ The readout is **Options → Spend**, not the overlay. Cache replay inside an al
 
 | Layer | Dataset | Who can see it |
 | --- | --- | --- |
-| **Money ledger (this is the flywheel)** | $ per brief, waste, completed average | The user, on-device. Company: only after Autovox pays. |
+| **Managed economics (this is the flywheel)** | Settled revenue, provider COGS, completion, fault waste, credits | Autovox control plane; aggregates only reach the operator. |
+| **BYOK money ledger** | $ per brief, waste, completed average | The user, on-device only. |
 | **Store pulse (acquisition only)** | Public CWS users / rating / reviews | Anyone. `pnpm pulse` → `store/pulse.*` |
 
-Do **not** complete the flywheel with GA4, PostHog, or any in-extension product telemetry. That would break [PRIVACY.md](../PRIVACY.md) and the CWS “no data collection” declaration. Do not put spend on the Wire Meter faceplate ([DESIGN.md](../DESIGN.md)).
+Do **not** add GA4, PostHog, or generic in-extension telemetry. Managed mode collects a strict lifecycle state machine and financial records only; its complete data boundary is in [PRIVACY.md](../PRIVACY.md). Do not put spend on the Wire Meter faceplate ([DESIGN.md](../DESIGN.md)).
 
-## Company pulse (Autovox on the rail)
+## Company rail
 
-BYOK means the dollars and the learning go to OpenRouter. Company-level compounding needs Autovox **on the payment rail**:
+Managed mode is deliberately bounded:
 
-1. Autovox-owned OpenRouter keys (users no longer paste their own inference key)
-2. An OpenRouter **management key** (inference keys get 403 on analytics)
-3. Optional later: Autovox billing so margin is first-party
+1. Clerk authenticates a managed account.
+2. Convex reserves customer credits and the global provider budget transactionally.
+3. Convex creates a short-lived OpenRouter key capped to the session.
+4. The extension sends page content directly to OpenRouter with ZDR enforced.
+5. Terminal state disables the key; Convex reconciles provider truth and deletes it.
+6. Stripe webhooks grant purchased credits and record settled revenue/refunds.
 
-When `OPENROUTER_MANAGEMENT_KEY` is set:
+The first offer is 3 trial credits and a one-time 100-credit pack. Subscription is a later decision only after repeat purchases prove recurring demand. See [managed-listening.md](managed-listening.md) for the one-time launch setup.
+
+## Deterministic operator
+
+The daily operator reads only aggregate economics:
 
 ```bash
-pnpm money-pulse
+pnpm economics-pulse
 ```
 
-queries `POST /api/v1/analytics/query` and writes `store/money-pulse.json`. Without that key the script exits cleanly and records that the company rail is not live. Never commit the management key.
+It writes:
 
-## Store pulse (keep, but do not steer product by it)
+- [`store/economics.json`](../store/economics.json) — aggregate machine input
+- [`store/decision.md`](../store/decision.md) — one bounded decision packet
+
+The decision order is code, not an LLM:
+
+1. frozen budget / reconciliation failure → stop
+2. no managed trial starts → acquisition
+3. 10 trials and no payment → paid conversion
+4. completion below 85% → reliability
+5. contribution margin below 60% → cost
+6. insufficient evidence → hold
+
+An agent may implement the decision. It cannot choose the budget, expand data collection, change processors, add permissions, or invent work when the decision is `hold`.
+
+## Store pulse (acquisition only)
 
 ```bash
 pnpm pulse
@@ -67,23 +89,24 @@ Still snapshots the public listing into [`store/pulse.json`](../store/pulse.json
 Create a scheduled or issue-triggered [Cursor Automation](https://cursor.com/automations) on `tsjnsn/autovox` with a prompt like:
 
 ```
-You are closing Autovox's money flywheel. Read docs/flywheel.md, DESIGN.md,
-PRIVACY.md, and store/money-pulse.json if it exists. Store pulse
-(store/pulse.*) is acquisition only.
+You are the bounded Autovox operator. Read docs/flywheel.md, DESIGN.md,
+PRIVACY.md, store/economics.json, and store/decision.md. Store pulse is
+acquisition context only.
 
 Rules:
-- Money is the data. Optimize wasted $ on faults and $ per completed brief.
-- Do not add in-extension analytics, new host permissions, or a backend
-  unless the change is Autovox sitting on the OpenRouter payment rail.
+- Implement only the objective and allowed paths in store/decision.md.
+- If action is hold or stop, do not create a product PR.
+- Optimize gross profit from completed listening.
+- Do not increase budgets, prices, permissions, processors, or data fields.
+- Never collect URL, title, page text, prompts, scripts, audio, or raw errors.
 - Prefer borrowed media UX over dashboard chrome (DESIGN.md).
 - Spend belongs in Options, never on the overlay faceplate.
-- If users are low and reviews are empty, listing conversion is an
-  acquisition task — do not confuse it with the money flywheel.
-- Keep page text off every spend record.
+- One active experiment and one focused PR at a time.
+- Add tests, rollback conditions, evidence denominators, and expected dollars.
 
-Ship a small PR. Say what dollar outcome you expect.
+Ship only after CI passes. Never bypass a frozen budget.
 ```
 
 ## First-run reality (2026-09)
 
-The listing is live at version 0.2.0 with a handful of public users. Until Autovox owns spend, the flywheel’s job is to **record every dollar this profile already pays** so the next product change has a cost function. Store counts will not tell you if a model, voice, or length change was worth it.
+The listing is live at version 0.2.0 with a handful of public users. The first milestone is **10 settled, unrefunded credit-pack purchases**. At this sample size the operator reports counts, not statistical theater, and runs at most one reversible change at a time.

@@ -42,7 +42,10 @@ if (!siteUrl || !operatorSecret) {
     status: "unconfigured",
     note: "Set AUTOVOX_CONTROL_PLANE_SITE_URL and AUTOVOX_OPERATOR_SECRET after the managed control plane is deployed.",
     snapshot: null,
-    decision: evaluateEconomics(emptySnapshot),
+    decision: unavailableDecision(
+      "hold",
+      "The managed control plane is not configured, so there is no economic evidence.",
+    ),
   };
 } else {
   pulse = await fetchPulse(siteUrl, operatorSecret);
@@ -78,7 +81,10 @@ async function fetchPulse(
         status: "error",
         note: `Control plane returned HTTP ${response.status}.`,
         snapshot: null,
-        decision: evaluateEconomics(emptySnapshot),
+        decision: unavailableDecision(
+          "stop",
+          "Economic truth is unavailable; do not spend or ship.",
+        ),
       };
     }
     const payload: unknown = await response.json();
@@ -101,9 +107,30 @@ async function fetchPulse(
           ? error.message
           : "Failed to fetch the economics snapshot.",
       snapshot: null,
-      decision: evaluateEconomics(emptySnapshot),
+      decision: unavailableDecision(
+        "stop",
+        "Economic truth is unavailable; do not spend or ship.",
+      ),
     };
   }
+}
+
+function unavailableDecision(
+  action: "hold" | "stop",
+  reason: string,
+): OperatorDecision {
+  const base = evaluateEconomics(emptySnapshot);
+  return {
+    ...base,
+    objective: action === "stop" ? "freeze" : "hold",
+    reason,
+    expectedEffect:
+      action === "stop"
+        ? "Prevent decisions without reconciled economics."
+        : "Wait for the revenue rail to be configured.",
+    allowedPaths: [],
+    action,
+  };
 }
 
 function readExisting(): EconomicsPulse | null {

@@ -17,8 +17,10 @@ import {
   usageToLineItem,
 } from './money';
 import {
+  clearManagedTabSession,
   openManagedSession,
   reportManagedLifecycle,
+  setManagedTabSession,
 } from './managed';
 import { getSettings } from './storage';
 import type {
@@ -124,6 +126,27 @@ export async function runBriefPipeline(
   });
   await setTabMoneySession(tabId, expectedUrl, sessionId);
 
+  if (managed) {
+    try {
+      const funded = await openManagedSession({
+        kind: 'brief',
+        reportLength: settings.reportLength,
+        voice: settings.voice,
+        outputLanguage: settings.outputLanguage,
+      });
+      auth = funded.auth;
+      managedSessionId = funded.sessionId;
+      await setManagedTabSession(tabId, funded.sessionId);
+    } catch (error) {
+      await finishMoneySession(sessionId, 'fault', 'none');
+      throw error;
+    }
+  }
+  if (!auth) {
+    await finishMoneySession(sessionId, 'fault', 'none');
+    throw new Error('Could not authorize this brief');
+  }
+
   onProgress({
     phase: 'extracting',
     message: 'Extracting article',
@@ -139,6 +162,17 @@ export async function runBriefPipeline(
       throw new DOMException('Page changed during briefing', 'AbortError');
     }
   } catch (error) {
+    if (managedSessionId) {
+      const event: ManagedLifecycleEvent = isAbortError(error)
+        ? { type: 'aborted', playbackSeconds: 0 }
+        : {
+            type: 'fault',
+            stage: 'extract',
+            playbackSeconds: 0,
+          };
+      await safeReportManaged(managedSessionId, event);
+      await clearManagedTabSession(tabId, managedSessionId);
+    }
     await finishMoneySession(
       sessionId,
       isAbortError(error) ? 'aborted' : 'fault',
@@ -158,26 +192,6 @@ export async function runBriefPipeline(
     detail: 'Rewriting into a broadcast-ready script…',
   });
 
-  if (managed) {
-    try {
-      const funded = await openManagedSession({
-        kind: 'brief',
-        reportLength: settings.reportLength,
-        voice: settings.voice,
-        outputLanguage: settings.outputLanguage,
-      });
-      auth = funded.auth;
-      managedSessionId = funded.sessionId;
-    } catch (error) {
-      await finishMoneySession(sessionId, 'fault', 'understand');
-      throw error;
-    }
-  }
-  if (!auth) {
-    await finishMoneySession(sessionId, 'fault', 'understand');
-    throw new Error('Could not authorize this brief');
-  }
-
   let script: NewsReportScript;
   try {
     const understood = await understandArticle({
@@ -185,6 +199,7 @@ export async function runBriefPipeline(
       article,
       reportLength: settings.reportLength,
       outputLanguage: settings.outputLanguage,
+      signal,
     });
     script = understood.script;
     await addMoneyLine(
@@ -200,15 +215,15 @@ export async function runBriefPipeline(
       );
     }
     if (managedSessionId) {
-      await safeReportManaged(managedSessionId, {
-        type: isAbortError(error) ? 'aborted' : 'fault',
-        ...(isAbortError(error)
-          ? { playbackSeconds: 0 }
-          : {
-              stage: 'understand' as const,
-              playbackSeconds: 0,
-            }),
-      });
+      const event: ManagedLifecycleEvent = isAbortError(error)
+        ? { type: 'aborted', playbackSeconds: 0 }
+        : {
+            type: 'fault',
+            stage: 'understand',
+            playbackSeconds: 0,
+          };
+      await safeReportManaged(managedSessionId, event);
+      await clearManagedTabSession(tabId, managedSessionId);
     }
     await finishMoneySession(
       sessionId,
@@ -225,6 +240,7 @@ export async function runBriefPipeline(
       siteName: article.siteName,
     },
     script,
+    reportLength: settings.reportLength,
     moneySessionId: sessionId,
     managedSessionId,
   };

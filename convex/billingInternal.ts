@@ -58,6 +58,8 @@ export const applyCheckout = internalMutation({
       stripeObjectId: args.stripeObjectId,
       productKey: args.productKey,
       grossMicroUsd: args.grossMicroUsd,
+      refundedMicroUsd: 0,
+      revokedCredits: 0,
       currency: args.currency.toLowerCase(),
       createdAt: args.now,
     });
@@ -112,13 +114,25 @@ export const applyRefund = internalMutation({
 
     const original = await ctx.db
       .query("billingReceipts")
-      .withIndex("by_stripe_object", (q) =>
-        q.eq("stripeObjectId", args.stripeObjectId),
+      .withIndex("by_stripe_object_and_event", (q) =>
+        q
+          .eq("stripeObjectId", args.stripeObjectId)
+          .eq("eventType", "checkout.session.completed"),
       )
-      .first();
-    if (!original || original.eventType !== "checkout.session.completed") {
+      .unique();
+    if (!original) {
       throw new Error("Original settled payment was not found");
     }
+    const alreadyRefunded = original.refundedMicroUsd ?? 0;
+    const remainingRefundable = Math.max(
+      0,
+      original.grossMicroUsd - alreadyRefunded,
+    );
+    const appliedRefund = Math.min(
+      args.refundMicroUsd,
+      remainingRefundable,
+    );
+    if (appliedRefund <= 0) return false;
     const balance = await ctx.db
       .query("creditBalances")
       .withIndex("by_account", (q) =>
@@ -128,23 +142,28 @@ export const applyRefund = internalMutation({
     if (!balance) {
       throw new Error("Refund account balance is missing");
     }
+    const previouslyRevoked = original.revokedCredits ?? 0;
+    const targetRevoked = Math.floor(
+      (CREDIT_PACK_CREDITS *
+        (alreadyRefunded + appliedRefund)) /
+        original.grossMicroUsd,
+    );
     const removable = Math.min(
-      CREDIT_PACK_CREDITS,
-      Math.max(
-        0,
-        balance.grantedCredits -
-          balance.consumedCredits -
-          balance.reservedCredits,
-      ),
+      targetRevoked - previouslyRevoked,
+      CREDIT_PACK_CREDITS - previouslyRevoked,
     );
 
+    await ctx.db.patch("billingReceipts", original._id, {
+      refundedMicroUsd: alreadyRefunded + appliedRefund,
+      revokedCredits: previouslyRevoked + removable,
+    });
     await ctx.db.insert("billingReceipts", {
       providerEventId: args.providerEventId,
       accountId: original.accountId,
-      eventType: "charge.refunded",
+      eventType: "refund.succeeded",
       stripeObjectId: args.stripeObjectId,
       productKey: original.productKey,
-      grossMicroUsd: -args.refundMicroUsd,
+      grossMicroUsd: -appliedRefund,
       currency: args.currency.toLowerCase(),
       createdAt: args.now,
     });
@@ -165,8 +184,8 @@ export const applyRefund = internalMutation({
     await addRevenueMetric(
       ctx,
       args.now,
-      -args.refundMicroUsd,
-      0,
+      -appliedRefund,
+      alreadyRefunded === 0 ? -1 : 0,
     );
     return true;
   },

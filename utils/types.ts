@@ -81,6 +81,8 @@ export interface BriefResult {
     siteName: string | null;
   };
   script: NewsReportScript;
+  /** Immutable pricing dimension for managed replay. */
+  reportLength?: ReportLength;
   /** Local spend session — no page content is attached to the ledger. */
   moneySessionId?: string;
   /** Server-side funded session. The short-lived key is never persisted here. */
@@ -112,6 +114,9 @@ export type ExtensionMessage =
       type: 'GET_MANAGED_AUTH';
       sessionId: string;
       estimatedSeconds: number;
+      reportLength: ReportLength;
+      voice: VoiceId;
+      outputLanguage: OutputLanguage;
     }
   | {
       type: 'MANAGED_LIFECYCLE';

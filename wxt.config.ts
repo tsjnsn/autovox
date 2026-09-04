@@ -7,11 +7,25 @@ const BROAD_HOST_PERMISSIONS = new Set([
   'http://*/*',
   'https://*/*',
 ]);
+function hostPermission(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return `${url.origin}/*`;
+  } catch {
+    return null;
+  }
+}
+
+const clerkHost = hostPermission(
+  process.env.WXT_PUBLIC_CLERK_FRONTEND_API_URL,
+);
+const convexHost = hostPermission(process.env.WXT_PUBLIC_CONVEX_URL);
 const MANAGED_HOST_PERMISSIONS =
   process.env.WXT_PUBLIC_MANAGED_ENABLED === 'true'
     ? [
-        'https://*.convex.cloud/*',
-        'https://*.clerk.accounts.dev/*',
+        ...(convexHost ? [convexHost] : []),
+        ...(clerkHost ? [clerkHost] : []),
       ]
     : [];
 

@@ -22,8 +22,8 @@
     "lint": "eslint . --max-warnings=0",
     "test": "tsx --test tests/*.test.ts",
     "check": "pnpm lint && pnpm compile && pnpm test && pnpm build",
-    "convex:dev": "CONVEX_AGENT_MODE=anonymous convex dev",
-    "convex:check": "CONVEX_AGENT_MODE=anonymous convex dev --once",
+    "convex:dev": "convex dev",
+    "convex:check": "convex dev --once",
     "postinstall": "wxt prepare"
   },
   "dependencies": {

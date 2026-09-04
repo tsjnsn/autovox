@@ -1,8 +1,12 @@
-import { useEffect, useState, type FormEvent } from 'react';
 import {
+  useCallback,
+  useEffect,
+  useState,
+  type FormEvent,
+} from 'react';
+import {
+  Show,
   SignInButton,
-  SignedIn,
-  SignedOut,
   UserButton,
   useAuth,
 } from '@clerk/chrome-extension';
@@ -48,7 +52,7 @@ function ManagedPanel({
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
 
-  const refresh = async (ensure = false) => {
+  const refresh = useCallback(async (ensure = false) => {
     if (!isSignedIn) {
       setAccount(null);
       return;
@@ -66,20 +70,17 @@ function ManagedPanel({
     } else {
       setError(response.error ?? 'Could not load managed credits');
     }
-  };
+  }, [isSignedIn]);
 
   useEffect(() => {
     void refresh(true);
-    // Account creation is idempotent and should run once after auth changes.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn]);
+  }, [refresh]);
 
   useEffect(() => {
     const onFocus = () => void refresh();
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isSignedIn]);
+  }, [refresh]);
 
   const startCheckout = async () => {
     setBusy(true);
@@ -111,24 +112,28 @@ function ManagedPanel({
             No provider account needed. Start with 3 funded briefs.
           </p>
         </div>
-        <SignedIn>
+        <Show when="signed-in">
           <UserButton />
-        </SignedIn>
+        </Show>
       </div>
 
-      <SignedOut>
+      <Show when="signed-out">
         <SignInButton mode="modal">
           <button type="button" className="btn-primary">
             Sign in
           </button>
         </SignInButton>
-      </SignedOut>
+      </Show>
 
-      <SignedIn>
+      <Show when="signed-in">
         <p className="managed-block__balance">
           {account
             ? `${account.availableCredits} credit${account.availableCredits === 1 ? '' : 's'} available`
             : 'Loading credits…'}
+        </p>
+        <p className="hint">
+          Short and standard use 1 credit; deep uses 2. A credit is
+          consumed only when the provider reports spend.
         </p>
         <div className="managed-block__actions">
           {!active ? (
@@ -151,7 +156,7 @@ function ManagedPanel({
             {busy ? 'Opening…' : 'Buy 100 credits'}
           </button>
         </div>
-      </SignedIn>
+      </Show>
       {error ? <p className="hint warn">{error}</p> : null}
     </section>
   );

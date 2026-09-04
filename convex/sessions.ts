@@ -66,6 +66,29 @@ export const reserve = internalMutation({
       throw new Error("Account is suspended");
     }
 
+    let control = await ctx.db
+      .query("controlState")
+      .withIndex("by_key", (q) => q.eq("key", "production"))
+      .unique();
+    if (!control) {
+      const controlId = await ctx.db.insert("controlState", {
+        key: "production",
+        frozen: false,
+        updatedAt: args.now,
+      });
+      control = await ctx.db.get("controlState", controlId);
+    }
+    if (!control) {
+      throw new Error("Failed to initialize production controls");
+    }
+    if (control.frozen) {
+      throw new Error(
+        control.reason
+          ? `Managed listening paused: ${control.reason}`
+          : "Managed listening is paused",
+      );
+    }
+
     const existing = await ctx.db
       .query("listeningSessions")
       .withIndex("by_account_and_client_request", (q) =>
@@ -85,12 +108,31 @@ export const reserve = internalMutation({
       )
       .order("desc")
       .take(10);
-    if (
-      recent.some(
-        (session) =>
-          session.status === "reserved" || session.status === "active",
-      )
-    ) {
+    let hasBlockingSession = false;
+    for (const session of recent) {
+      const pending = session.reservationOpen;
+      if (
+        pending &&
+        (session.status === "reserved" || session.status === "active") &&
+        session.keyExpiresAt <= args.now
+      ) {
+        await ctx.db.patch("listeningSessions", session._id, {
+          status: "expired",
+          outcome: "expired",
+          faultStage: "none",
+          reservationOpen: false,
+          endedAt: args.now,
+        });
+        await ctx.scheduler.runAfter(
+          0,
+          internal.openrouter.finalizeSession,
+          { sessionId: session._id },
+        );
+        continue;
+      }
+      if (pending) hasBlockingSession = true;
+    }
+    if (hasBlockingSession) {
       throw new Error("A managed brief is already in progress");
     }
 
@@ -174,6 +216,8 @@ export const reserve = internalMutation({
       reservedCredits,
       reservedMicroUsd: args.reservedMicroUsd,
       budgetWindowStart: args.budgetWindowStart,
+      reservationOpen: true,
+      keyCleanupComplete: false,
       keyExpiresAt: args.keyExpiresAt,
       reconcileAttempts: 0,
       startedAt: args.now,
@@ -337,6 +381,7 @@ export const getForFinalize = internalQuery({
       status: sessionStatusValidator,
       outcome: v.optional(sessionOutcomeValidator),
       keyHash: v.optional(v.string()),
+      keyExpiresAt: v.number(),
       reservedMicroUsd: v.number(),
       reconcileAttempts: v.number(),
     }),
@@ -350,9 +395,70 @@ export const getForFinalize = internalQuery({
       status: session.status,
       outcome: session.outcome,
       keyHash: session.openRouterKeyHash,
+      keyExpiresAt: session.keyExpiresAt,
       reservedMicroUsd: session.reservedMicroUsd,
       reconcileAttempts: session.reconcileAttempts,
     };
+  },
+});
+
+export const getKeyForDelete = internalQuery({
+  args: { sessionId: v.id("listeningSessions") },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("listeningSessions", args.sessionId);
+    return session?.openRouterKeyHash ?? null;
+  },
+});
+
+export const claimFinalize = internalMutation({
+  args: {
+    sessionId: v.id("listeningSessions"),
+    now: v.number(),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("listeningSessions", args.sessionId);
+    if (!session || session.status === "reconciled") return false;
+    if (
+      session.reconcileLeaseUntil !== undefined &&
+      session.reconcileLeaseUntil > args.now
+    ) {
+      return false;
+    }
+    await ctx.db.patch("listeningSessions", session._id, {
+      reconcileLeaseUntil: args.now + 2 * 60 * 1000,
+    });
+    return true;
+  },
+});
+
+export const closeReservation = internalMutation({
+  args: { sessionId: v.id("listeningSessions") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("listeningSessions", args.sessionId);
+    if (session?.reservationOpen) {
+      await ctx.db.patch("listeningSessions", session._id, {
+        reservationOpen: false,
+      });
+    }
+    return null;
+  },
+});
+
+export const markKeyDeleted = internalMutation({
+  args: { sessionId: v.id("listeningSessions") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get("listeningSessions", args.sessionId);
+    if (session) {
+      await ctx.db.patch("listeningSessions", session._id, {
+        openRouterKeyHash: undefined,
+        keyCleanupComplete: true,
+      });
+    }
+    return null;
   },
 });
 
@@ -385,7 +491,8 @@ export const settle = internalMutation({
     if (!balance) {
       throw new Error("Account balance is missing");
     }
-    const shouldConsumeCredits = session.outcome === "completed";
+    const shouldConsumeCredits =
+      session.outcome === "completed" || args.actualMicroUsd > 0;
     await ctx.db.patch("creditBalances", balance._id, {
       reservedCredits: Math.max(
         0,
@@ -422,10 +529,20 @@ export const settle = internalMutation({
           : budget.freezeReason,
       updatedAt: args.now,
     });
+    if (nextConsumed > budget.capMicroUsd) {
+      await freezeControl(
+        ctx,
+        "Provider spend exceeded the hard daily cap",
+        args.now,
+      );
+    }
 
     await ctx.db.patch("listeningSessions", session._id, {
       status: "reconciled",
+      reservationOpen: false,
       actualMicroUsd: args.actualMicroUsd,
+      keyCleanupComplete: !session.openRouterKeyHash,
+      reconcileLeaseUntil: undefined,
       reconciledAt: args.now,
     });
     await ctx.db.insert("creditLedger", {
@@ -468,6 +585,13 @@ export const settle = internalMutation({
         (shouldConsumeCredits ? session.reservedCredits : 0),
       updatedAt: args.now,
     });
+    if (session.openRouterKeyHash) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.openrouter.deleteSessionKey,
+        { sessionId: session._id },
+      );
+    }
     return null;
   },
 });
@@ -485,6 +609,7 @@ export const markReconcileFailed = internalMutation({
     await ctx.db.patch("listeningSessions", session._id, {
       status: "reconcile_failed",
       reconcileAttempts: attempts,
+      reconcileLeaseUntil: undefined,
     });
     if (attempts < 3) {
       await ctx.scheduler.runAfter(
@@ -508,6 +633,11 @@ export const markReconcileFailed = internalMutation({
           updatedAt: args.now,
         });
       }
+      await freezeControl(
+        ctx,
+        "Provider usage reconciliation failed three times",
+        args.now,
+      );
     }
     return attempts;
   },
@@ -536,6 +666,7 @@ export const sweepExpired = internalMutation({
         status: "expired",
         outcome: "expired",
         faultStage: "none",
+        reservationOpen: false,
         endedAt: now,
       });
       await ctx.scheduler.runAfter(
@@ -545,6 +676,84 @@ export const sweepExpired = internalMutation({
       );
     }
     return active.length + reserved.length;
+  },
+});
+
+export const retryPendingFinalization = internalMutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const cutoff = Date.now() - 10 * 60 * 1000;
+    const statuses = [
+      "completed",
+      "fault",
+      "aborted",
+      "expired",
+      "reconcile_failed",
+    ] as const;
+    let scheduled = 0;
+    for (const status of statuses) {
+      const sessions = await ctx.db
+        .query("listeningSessions")
+        .withIndex("by_status_and_expiry", (q) =>
+          q.eq("status", status).lt("keyExpiresAt", cutoff),
+        )
+        .take(20);
+      for (const session of sessions) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.openrouter.finalizeSession,
+          { sessionId: session._id },
+        );
+        scheduled += 1;
+      }
+    }
+
+    const pendingKeyDeletes = await ctx.db
+      .query("listeningSessions")
+      .withIndex("by_status_cleanup_and_started", (q) =>
+        q
+          .eq("status", "reconciled")
+          .eq("keyCleanupComplete", false),
+      )
+      .take(50);
+    for (const session of pendingKeyDeletes) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.openrouter.deleteSessionKey,
+        { sessionId: session._id },
+      );
+      scheduled += 1;
+    }
+    return scheduled;
+  },
+});
+
+export const deleteOldReconciled = internalMutation({
+  args: {},
+  returns: v.number(),
+  handler: async (ctx) => {
+    const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    const old = await ctx.db
+      .query("listeningSessions")
+      .withIndex("by_status_cleanup_and_started", (q) =>
+        q
+          .eq("status", "reconciled")
+          .eq("keyCleanupComplete", true)
+          .lt("startedAt", cutoff),
+      )
+      .take(100);
+    for (const session of old) {
+      await ctx.db.delete("listeningSessions", session._id);
+    }
+    if (old.length === 100) {
+      await ctx.scheduler.runAfter(
+        0,
+        internal.sessions.deleteOldReconciled,
+        {},
+      );
+    }
+    return old.length;
   },
 });
 
@@ -592,6 +801,7 @@ async function releaseReservation(
   });
   await ctx.db.patch("listeningSessions", session._id, {
     status,
+    reservationOpen: false,
     endedAt: now,
   });
   await ctx.db.insert("creditLedger", {
@@ -619,4 +829,29 @@ async function releaseReservation(
       updatedAt: now,
     });
   }
+}
+
+async function freezeControl(
+  ctx: MutationCtx,
+  reason: string,
+  now: number,
+): Promise<void> {
+  const control = await ctx.db
+    .query("controlState")
+    .withIndex("by_key", (q) => q.eq("key", "production"))
+    .unique();
+  if (control) {
+    await ctx.db.patch("controlState", control._id, {
+      frozen: true,
+      reason,
+      updatedAt: now,
+    });
+    return;
+  }
+  await ctx.db.insert("controlState", {
+    key: "production",
+    frozen: true,
+    reason,
+    updatedAt: now,
+  });
 }

@@ -1,0 +1,33 @@
+{
+  "fetchedAt": "2026-09-04T00:09:45.374Z",
+  "status": "unconfigured",
+  "note": "Set AUTOVOX_CONTROL_PLANE_SITE_URL and AUTOVOX_OPERATOR_SECRET after the managed control plane is deployed.",
+  "snapshot": null,
+  "decision": {
+    "decisionVersion": 1,
+    "objective": "hold",
+    "reason": "The managed control plane is not configured, so there is no economic evidence.",
+    "evidence": {
+      "sessionsStarted": 0,
+      "sessionsCompleted": 0,
+      "sessionsFaulted": 0,
+      "sessionsAborted": 0,
+      "confirmedPayments": 0,
+      "grossRevenueMicroUsd": 0,
+      "providerCostMicroUsd": 0,
+      "completionRate": null,
+      "contributionMarginRate": null
+    },
+    "expectedEffect": "Wait for the revenue rail to be configured.",
+    "allowedPaths": [],
+    "constraints": [
+      "one active experiment",
+      "no new extension permissions",
+      "no new data fields or processors",
+      "no page content, URL, title, script, or audio collection",
+      "no budget, price, or capital-limit increase",
+      "one focused pull request with tests and rollback"
+    ],
+    "action": "hold"
+  }
+}

@@ -20,8 +20,5 @@ jobs:
           runtime: node@22
           cache: true
 
-      - name: Typecheck
-        run: pnpm compile
-
-      - name: Build
-        run: pnpm build
+      - name: Validate
+        run: pnpm check

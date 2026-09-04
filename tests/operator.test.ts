@@ -31,7 +31,7 @@ function snapshot(
   };
 }
 
-test("freezes before proposing product work", () => {
+void test("freezes before proposing product work", () => {
   const input = snapshot({ sessionsStarted: 20, sessionsCompleted: 20 });
   input.budget = {
     windowStart: 0,
@@ -48,7 +48,7 @@ test("freezes before proposing product work", () => {
   assert.deepEqual(decision.allowedPaths, []);
 });
 
-test("prioritizes paid conversion after ten unpaid trials", () => {
+void test("prioritizes paid conversion after ten unpaid trials", () => {
   const decision = evaluateEconomics(
     snapshot({
       sessionsStarted: 10,
@@ -59,7 +59,7 @@ test("prioritizes paid conversion after ten unpaid trials", () => {
   assert.equal(decision.objective, "improve_paid_conversion");
 });
 
-test("prioritizes reliability before margin", () => {
+void test("prioritizes reliability before margin", () => {
   const decision = evaluateEconomics(
     snapshot({
       sessionsStarted: 10,
@@ -73,7 +73,7 @@ test("prioritizes reliability before margin", () => {
   assert.equal(decision.objective, "reduce_fault_waste");
 });
 
-test("holds when ten payments are healthy", () => {
+void test("holds when ten payments are healthy", () => {
   const decision = evaluateEconomics(
     snapshot({
       sessionsStarted: 20,

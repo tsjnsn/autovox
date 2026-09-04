@@ -61,6 +61,13 @@ export default defineSchema({
     updatedAt: v.number(),
   }).index("by_scope_and_window", ["scope", "windowStart"]),
 
+  controlState: defineTable({
+    key: v.string(),
+    frozen: v.boolean(),
+    reason: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+
   listeningSessions: defineTable({
     accountId: v.id("accounts"),
     clientRequestId: v.string(),
@@ -76,13 +83,16 @@ export default defineSchema({
     reservedCredits: v.number(),
     reservedMicroUsd: v.number(),
     budgetWindowStart: v.number(),
+    reservationOpen: v.boolean(),
     actualMicroUsd: v.optional(v.number()),
     openRouterKeyHash: v.optional(v.string()),
+    keyCleanupComplete: v.boolean(),
     keyExpiresAt: v.number(),
     scriptEstimatedSeconds: v.optional(v.number()),
     playbackStartedAt: v.optional(v.number()),
     playbackSeconds: v.optional(v.number()),
     reconcileAttempts: v.number(),
+    reconcileLeaseUntil: v.optional(v.number()),
     startedAt: v.number(),
     endedAt: v.optional(v.number()),
     reconciledAt: v.optional(v.number()),
@@ -92,7 +102,13 @@ export default defineSchema({
       "clientRequestId",
     ])
     .index("by_account_and_started", ["accountId", "startedAt"])
-    .index("by_status_and_expiry", ["status", "keyExpiresAt"]),
+    .index("by_status_and_expiry", ["status", "keyExpiresAt"])
+    .index("by_status_and_started", ["status", "startedAt"])
+    .index("by_status_cleanup_and_started", [
+      "status",
+      "keyCleanupComplete",
+      "startedAt",
+    ]),
 
   billingReceipts: defineTable({
     providerEventId: v.string(),
@@ -101,11 +117,17 @@ export default defineSchema({
     stripeObjectId: v.string(),
     productKey: planKeyValidator,
     grossMicroUsd: v.number(),
+    refundedMicroUsd: v.optional(v.number()),
+    revokedCredits: v.optional(v.number()),
     currency: v.string(),
     createdAt: v.number(),
   })
     .index("by_provider_event", ["providerEventId"])
     .index("by_stripe_object", ["stripeObjectId"])
+    .index("by_stripe_object_and_event", [
+      "stripeObjectId",
+      "eventType",
+    ])
     .index("by_account_and_created", ["accountId", "createdAt"]),
 
   dailyMetrics: defineTable({

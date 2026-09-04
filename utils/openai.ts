@@ -46,6 +46,7 @@ export async function createStructuredResponse(options: {
     schema: Record<string, unknown>;
   };
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
+  signal?: AbortSignal;
 }): Promise<{ text: string; usage: ProviderUsage }> {
   const response = await fetch(`${authApiRoot(options.auth)}/responses`, {
     method: 'POST',
@@ -79,6 +80,7 @@ export async function createStructuredResponse(options: {
           }
         : {}),
     }),
+    signal: options.signal,
   });
 
   if (!response.ok) {

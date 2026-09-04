@@ -19,8 +19,8 @@ jobs:
           runtime: node@22
           cache: true
 
-      - name: Typecheck
-        run: pnpm compile
+      - name: Validate
+        run: pnpm lint && pnpm compile && pnpm test
 
       - name: Zip Chrome extension
         run: pnpm zip

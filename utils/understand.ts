@@ -100,6 +100,7 @@ export async function understandArticle(options: {
   article: ExtractedArticle;
   reportLength: ReportLength;
   outputLanguage: OutputLanguage;
+  signal?: AbortSignal;
 }): Promise<{ script: NewsReportScript; usage: ProviderUsage }> {
   const { text: content, usage } = await createStructuredResponse({
     auth: options.auth,
@@ -115,6 +116,7 @@ export async function understandArticle(options: {
       name: newsReportSchema.name,
       schema: newsReportSchema.schema as unknown as Record<string, unknown>,
     },
+    signal: options.signal,
   });
 
   let parsed: NewsReportScript;

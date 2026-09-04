@@ -76,7 +76,11 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function isAuthMode(value: unknown): value is MoneyAuthMode {
-  return value === 'openrouter' || value === 'apiKey';
+  return (
+    value === 'openrouter' ||
+    value === 'apiKey' ||
+    value === 'managed'
+  );
 }
 
 function isOutcome(value: unknown): value is MoneyOutcome {

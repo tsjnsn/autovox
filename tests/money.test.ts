@@ -31,7 +31,7 @@ function event(
   };
 }
 
-test("summarizes known spend without treating unknown cost as zero", () => {
+void test("summarizes known spend without treating unknown cost as zero", () => {
   const summary = summarizeMoneyEvents(
     [
       event("completed", "completed", 0.02),
@@ -49,7 +49,7 @@ test("summarizes known spend without treating unknown cost as zero", () => {
   assert.equal(summary.costUnknownCount, 1);
 });
 
-test("formats sub-cent costs without hiding them", () => {
+void test("formats sub-cent costs without hiding them", () => {
   assert.equal(formatUsd(0), "$0.00");
   assert.equal(formatUsd(0.005), "$0.0050");
   assert.equal(formatUsd(1.25), "$1.25");

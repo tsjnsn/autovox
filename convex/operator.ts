@@ -35,13 +35,18 @@ export const snapshot = internalQuery({
     ),
   }),
   handler: async (ctx, args) => {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.sinceDate)) {
+    const parsed = Date.parse(`${args.sinceDate}T00:00:00.000Z`);
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(args.sinceDate) ||
+      !Number.isFinite(parsed) ||
+      new Date(parsed).toISOString().slice(0, 10) !== args.sinceDate
+    ) {
       throw new Error("sinceDate must be YYYY-MM-DD");
     }
     const rows = await ctx.db
       .query("dailyMetrics")
       .withIndex("by_date", (q) => q.gte("date", args.sinceDate))
-      .order("asc")
+      .order("desc")
       .take(60);
     const budget = await ctx.db
       .query("budgetWindows")
@@ -50,11 +55,15 @@ export const snapshot = internalQuery({
       )
       .order("desc")
       .first();
+    const control = await ctx.db
+      .query("controlState")
+      .withIndex("by_key", (q) => q.eq("key", "production"))
+      .unique();
 
     return {
       snapshotVersion: 1 as const,
       sinceDate: args.sinceDate,
-      daily: rows.map((row) => ({
+      daily: rows.reverse().map((row) => ({
         date: row.date,
         sessionsStarted: row.sessionsStarted,
         sessionsCompleted: row.sessionsCompleted,
@@ -74,8 +83,8 @@ export const snapshot = internalQuery({
             capMicroUsd: budget.capMicroUsd,
             consumedMicroUsd: budget.consumedMicroUsd,
             reservedMicroUsd: budget.reservedMicroUsd,
-            frozen: budget.frozen,
-            freezeReason: budget.freezeReason,
+            frozen: budget.frozen || Boolean(control?.frozen),
+            freezeReason: control?.reason ?? budget.freezeReason,
           }
         : null,
     };

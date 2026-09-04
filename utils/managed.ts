@@ -1,6 +1,7 @@
 import { createClerkClient } from "@clerk/chrome-extension/client";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api";
+import type { Id } from "../convex/_generated/dataModel";
 import type { LlmAuth } from "./auth";
 import type {
   ManagedLifecycleEvent,
@@ -10,6 +11,7 @@ import type {
 } from "./types";
 
 const MANAGED_SESSION_PREFIX = "autovoxManagedSession:";
+const MANAGED_TAB_PREFIX = "autovoxManagedTab:";
 
 export interface ManagedAccountStatus {
   grantedCredits: number;
@@ -30,13 +32,12 @@ interface StoredManagedSession {
   expiresAt: number;
 }
 
-let clerkPromise: ReturnType<typeof createBackgroundClerk> | null = null;
-
 export function isManagedConfigured(): boolean {
   return (
     import.meta.env.WXT_PUBLIC_MANAGED_ENABLED === "true" &&
     Boolean(import.meta.env.WXT_PUBLIC_CONVEX_URL?.trim()) &&
-    Boolean(import.meta.env.WXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim())
+    Boolean(import.meta.env.WXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim()) &&
+    Boolean(import.meta.env.WXT_PUBLIC_CLERK_FRONTEND_API_URL?.trim())
   );
 }
 
@@ -138,7 +139,7 @@ export async function reportManagedLifecycle(
   try {
     await withManagedClient(async (client) => {
       await client.mutation(api.sessions.reportLifecycle, {
-        sessionId,
+        sessionId: sessionId as Id<"listeningSessions">,
         event,
       });
     });
@@ -153,6 +154,36 @@ export async function clearManagedSession(sessionId: string): Promise<void> {
   await browser.storage.session.remove(managedSessionKey(sessionId));
 }
 
+export async function setManagedTabSession(
+  tabId: number,
+  sessionId: string,
+): Promise<void> {
+  await browser.storage.session.set({
+    [managedTabKey(tabId)]: sessionId,
+  });
+}
+
+export async function getManagedTabSession(
+  tabId: number,
+): Promise<string | null> {
+  const key = managedTabKey(tabId);
+  const stored = await browser.storage.session.get(key);
+  const value = stored[key];
+  return typeof value === "string" && value ? value : null;
+}
+
+export async function clearManagedTabSession(
+  tabId: number,
+  expectedSessionId?: string,
+): Promise<void> {
+  const key = managedTabKey(tabId);
+  if (expectedSessionId) {
+    const stored = await browser.storage.session.get(key);
+    if (stored[key] !== expectedSessionId) return;
+  }
+  await browser.storage.session.remove(key);
+}
+
 async function withManagedClient<T>(
   operation: (client: ConvexHttpClient) => Promise<T>,
 ): Promise<T> {
@@ -163,17 +194,17 @@ async function withManagedClient<T>(
   if (!token) {
     throw new Error("Sign in to Autovox in Options for managed listening");
   }
-  const url = import.meta.env.WXT_PUBLIC_CONVEX_URL.trim();
+  const url = import.meta.env.WXT_PUBLIC_CONVEX_URL?.trim();
+  if (!url) {
+    throw new Error("Managed listening backend is not configured");
+  }
   const client = new ConvexHttpClient(url);
   client.setAuth(token);
   return await operation(client);
 }
 
 async function getManagedToken(): Promise<string | null> {
-  if (!clerkPromise) {
-    clerkPromise = createBackgroundClerk();
-  }
-  const clerk = await clerkPromise;
+  const clerk = await createBackgroundClerk();
   if (!clerk.session) return null;
   return await clerk.session.getToken({ template: "convex" });
 }
@@ -191,6 +222,10 @@ async function createBackgroundClerk() {
 
 function managedSessionKey(sessionId: string): string {
   return `${MANAGED_SESSION_PREFIX}${sessionId}`;
+}
+
+function managedTabKey(tabId: number): string {
+  return `${MANAGED_TAB_PREFIX}${tabId}`;
 }
 
 function pickAccountStatus(value: ManagedAccountStatus): ManagedAccountStatus {

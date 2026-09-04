@@ -30,7 +30,37 @@ registerRoutes(http, components.stripe, {
         throw new Error("Autovox credit packs must settle in USD");
       }
       await ctx.runMutation(internal.billingInternal.applyCheckout, {
-        providerEventId: event.id,
+        providerEventId: `payment:${paymentIntentId}`,
+        accountId,
+        stripeObjectId: paymentIntentId,
+        productKey,
+        grossMicroUsd: checkout.amount_total * 10_000,
+        currency: checkout.currency,
+        now: event.created * 1000,
+      });
+    },
+    "checkout.session.async_payment_succeeded": async (ctx, event) => {
+      const checkout = event.data.object;
+      const accountId = checkout.metadata?.accountId;
+      const productKey = checkout.metadata?.productKey;
+      const paymentIntentId =
+        typeof checkout.payment_intent === "string"
+          ? checkout.payment_intent
+          : checkout.payment_intent?.id;
+      if (
+        !accountId ||
+        productKey !== "credit_pack_100" ||
+        !paymentIntentId ||
+        checkout.amount_total === null ||
+        !checkout.currency
+      ) {
+        throw new Error("Settled checkout is missing required metadata");
+      }
+      if (checkout.currency.toLowerCase() !== "usd") {
+        throw new Error("Autovox credit packs must settle in USD");
+      }
+      await ctx.runMutation(internal.billingInternal.applyCheckout, {
+        providerEventId: `payment:${paymentIntentId}`,
         accountId,
         stripeObjectId: paymentIntentId,
         productKey,
@@ -41,6 +71,7 @@ registerRoutes(http, components.stripe, {
     },
     "refund.created": async (ctx, event) => {
       const refund = event.data.object;
+      if (refund.status !== "succeeded") return;
       const paymentIntentId =
         typeof refund.payment_intent === "string"
           ? refund.payment_intent
@@ -52,7 +83,28 @@ registerRoutes(http, components.stripe, {
         throw new Error("Autovox refunds must settle in USD");
       }
       await ctx.runMutation(internal.billingInternal.applyRefund, {
-        providerEventId: event.id,
+        providerEventId: `refund:${refund.id}`,
+        stripeObjectId: paymentIntentId,
+        refundMicroUsd: refund.amount * 10_000,
+        currency: refund.currency,
+        now: event.created * 1000,
+      });
+    },
+    "refund.updated": async (ctx, event) => {
+      const refund = event.data.object;
+      if (refund.status !== "succeeded") return;
+      const paymentIntentId =
+        typeof refund.payment_intent === "string"
+          ? refund.payment_intent
+          : refund.payment_intent?.id;
+      if (!paymentIntentId || !refund.currency) {
+        throw new Error("Refund is missing its payment intent");
+      }
+      if (refund.currency.toLowerCase() !== "usd") {
+        throw new Error("Autovox refunds must settle in USD");
+      }
+      await ctx.runMutation(internal.billingInternal.applyRefund, {
+        providerEventId: `refund:${refund.id}`,
         stripeObjectId: paymentIntentId,
         refundMicroUsd: refund.amount * 10_000,
         currency: refund.currency,

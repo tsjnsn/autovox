@@ -102,6 +102,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         type: 'GET_MANAGED_AUTH',
         sessionId: result.managedSessionId,
         estimatedSeconds: result.script.estimatedSeconds,
+        reportLength:
+          result.reportLength ?? settings.reportLength,
+        voice: settings.voice,
+        outputLanguage: settings.outputLanguage,
       })) as {
         ok: boolean;
         sessionId?: string;
@@ -126,7 +130,11 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   }, [
     result?.managedSessionId,
     result?.script.estimatedSeconds,
+    result?.reportLength,
     settings?.providerMode,
+    settings?.reportLength,
+    settings?.voice,
+    settings?.outputLanguage,
   ]);
 
   const attachTtsUsage = useCallback(async (usage: ProviderUsage) => {
@@ -201,7 +209,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           event,
         });
       } finally {
-        if (terminal) {
+        if (
+          terminal &&
+          managedRuntimeSessionRef.current === sessionId
+        ) {
           managedRuntimeSessionRef.current = null;
         }
       }
@@ -449,7 +460,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         {hasPlayer ? (
           <>
             <StreamingPlayer
-              key={streamKey}
+              key={`${streamKey}:${settings!.providerMode}`}
               script={result!.script}
               auth={playerAuth!}
               voice={settings!.voice}
