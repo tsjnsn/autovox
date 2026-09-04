@@ -19,6 +19,7 @@ import type {
   BriefProgress,
   BriefResult,
   ExtensionMessage,
+  ReportLength,
   Settings,
 } from '../utils/types';
 
@@ -137,7 +138,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     settings?.outputLanguage,
   ]);
 
-  const attachTtsUsage = useCallback(async (usage: ProviderUsage) => {
+  const attachTtsUsage = useCallback(async (
+    usage: ProviderUsage,
+    originalReportLength: ReportLength | undefined,
+  ) => {
     const latest = settingsRef.current;
     if (!latest) return;
 
@@ -157,7 +161,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     if (!existing || existing.outcome !== 'open') {
       sessionId = await startMoneySession({
         kind: 'tts_replay',
-        reportLength: latest.reportLength,
+        reportLength: originalReportLength ?? latest.reportLength,
         voice: latest.voice,
         outputLanguage: latest.outputLanguage,
         authMode,
@@ -202,19 +206,22 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         event.type === 'completed' ||
         event.type === 'fault' ||
         event.type === 'aborted';
+      let response: { ok?: boolean };
       try {
-        await browser.runtime.sendMessage({
+        response = (await browser.runtime.sendMessage({
           type: 'MANAGED_LIFECYCLE',
           sessionId,
           event,
-        });
-      } finally {
-        if (
-          terminal &&
-          managedRuntimeSessionRef.current === sessionId
-        ) {
-          managedRuntimeSessionRef.current = null;
-        }
+        })) as { ok?: boolean };
+      } catch {
+        return;
+      }
+      if (
+        response?.ok &&
+        terminal &&
+        managedRuntimeSessionRef.current === sessionId
+      ) {
+        managedRuntimeSessionRef.current = null;
       }
     },
     [],
@@ -435,8 +442,9 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   }, [finishTtsSession, reportManagedPlayback]);
 
   const handleUsage = useCallback(
-    (usage: ProviderUsage) => attachTtsUsage(usage),
-    [attachTtsUsage],
+    (usage: ProviderUsage) =>
+      attachTtsUsage(usage, result?.reportLength),
+    [attachTtsUsage, result?.reportLength],
   );
 
   const label =

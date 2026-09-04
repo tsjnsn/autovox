@@ -136,18 +136,33 @@ export async function reportManagedLifecycle(
     event.type === "completed" ||
     event.type === "fault" ||
     event.type === "aborted";
-  try {
-    await withManagedClient(async (client) => {
-      await client.mutation(api.sessions.reportLifecycle, {
-        sessionId: sessionId as Id<"listeningSessions">,
-        event,
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await withManagedClient(async (client) => {
+        await client.mutation(api.sessions.reportLifecycle, {
+          sessionId: sessionId as Id<"listeningSessions">,
+          event,
+        });
       });
-    });
-  } finally {
-    if (terminal) {
-      await browser.storage.session.remove(managedSessionKey(sessionId));
+      if (terminal) {
+        await browser.storage.session.remove(
+          managedSessionKey(sessionId),
+        );
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, 250 * 2 ** attempt),
+        );
+      }
     }
   }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Could not report managed lifecycle");
 }
 
 export async function clearManagedSession(sessionId: string): Promise<void> {
