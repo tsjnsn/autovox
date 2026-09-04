@@ -1,0 +1,27 @@
+{
+  "fetchedAt": "2026-09-03T22:17:37.511Z",
+  "extensionId": "aodlbiejdiibbpemagfngbdhaappejda",
+  "name": "Autovox",
+  "listingUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda",
+  "reviewsUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda/reviews",
+  "version": "0.2.0",
+  "userCount": 4,
+  "rating": null,
+  "reviewCount": null,
+  "size": "184KiB",
+  "updatedAt": "2026-08-12T02:25:33.000Z",
+  "category": "productivity/communication",
+  "storeGaMeasurementId": "G-WCK20EPPMX",
+  "privacyPolicyUrl": "https://raw.githubusercontent.com/tsjnsn/autovox/refs/heads/main/PRIVACY.md",
+  "reviews": [],
+  "previous": null,
+  "deltas": {
+    "userCount": null,
+    "rating": null,
+    "reviewCount": null,
+    "newReviewIds": []
+  },
+  "suggestedActions": [
+    "Listing conversion is the bottleneck: expand the Chrome Web Store long description and screenshots before adding product surface area."
+  ]
+}

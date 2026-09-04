@@ -1,18 +1,41 @@
-import { hasLlmAuth, resolveLlmAuth } from './auth';
+import {
+  hasLlmAuth,
+  resolveLlmAuth,
+  type LlmAuth,
+} from './auth';
 import {
   clearTabBrief,
   normalizePageUrl,
   samePageUrl,
   saveTabBriefResult,
+  setTabMoneySession,
 } from './briefState';
+import {
+  addMoneyLine,
+  finishMoneySession,
+  startMoneySession,
+  usageToLineItem,
+} from './money';
+import {
+  clearManagedTabSession,
+  openManagedSession,
+  reportManagedLifecycle,
+  setManagedTabSession,
+} from './managed';
 import { getSettings } from './storage';
 import type {
   BriefProgress,
   BriefResult,
   ExtractedArticle,
   ExtensionMessage,
+  ManagedLifecycleEvent,
+  NewsReportScript,
 } from './types';
-import { understandArticle } from './understand';
+import {
+  COMPREHENSION_MODEL,
+  UnderstandError,
+  understandArticle,
+} from './understand';
 
 type ProgressFn = (progress: BriefProgress) => void;
 
@@ -91,7 +114,38 @@ export async function runBriefPipeline(
       'Connect with OpenRouter or add an OpenAI API key in Options before briefing a page.',
     );
   }
-  const auth = resolveLlmAuth(settings);
+  const managed = settings.providerMode === 'managed';
+  let auth: LlmAuth | null = managed ? null : resolveLlmAuth(settings);
+  let managedSessionId: string | undefined;
+  const sessionId = await startMoneySession({
+    kind: 'brief',
+    reportLength: settings.reportLength,
+    voice: settings.voice,
+    outputLanguage: settings.outputLanguage,
+    authMode: managed ? 'managed' : auth!.mode,
+  });
+  await setTabMoneySession(tabId, expectedUrl, sessionId);
+
+  if (managed) {
+    try {
+      const funded = await openManagedSession({
+        kind: 'brief',
+        reportLength: settings.reportLength,
+        voice: settings.voice,
+        outputLanguage: settings.outputLanguage,
+      });
+      auth = funded.auth;
+      managedSessionId = funded.sessionId;
+      await setManagedTabSession(tabId, funded.sessionId);
+    } catch (error) {
+      await finishMoneySession(sessionId, 'fault', 'none');
+      throw error;
+    }
+  }
+  if (!auth) {
+    await finishMoneySession(sessionId, 'fault', 'none');
+    throw new Error('Could not authorize this brief');
+  }
 
   onProgress({
     phase: 'extracting',
@@ -99,13 +153,32 @@ export async function runBriefPipeline(
     detail: 'Pulling the main content from the page…',
   });
 
-  await assertStillOnPage(tabId, expectedUrl, signal);
-  const article = await extractFromTab(tabId);
-  await assertStillOnPage(tabId, expectedUrl, signal);
-
-  // Extracted document must still be the page we started on
-  if (article.url && !samePageUrl(article.url, expectedUrl)) {
-    throw new DOMException('Page changed during briefing', 'AbortError');
+  let article: ExtractedArticle;
+  try {
+    await assertStillOnPage(tabId, expectedUrl, signal);
+    article = await extractFromTab(tabId);
+    await assertStillOnPage(tabId, expectedUrl, signal);
+    if (article.url && !samePageUrl(article.url, expectedUrl)) {
+      throw new DOMException('Page changed during briefing', 'AbortError');
+    }
+  } catch (error) {
+    if (managedSessionId) {
+      const event: ManagedLifecycleEvent = isAbortError(error)
+        ? { type: 'aborted', playbackSeconds: 0 }
+        : {
+            type: 'fault',
+            stage: 'extract',
+            playbackSeconds: 0,
+          };
+      await safeReportManaged(managedSessionId, event);
+      await clearManagedTabSession(tabId, managedSessionId);
+    }
+    await finishMoneySession(
+      sessionId,
+      isAbortError(error) ? 'aborted' : 'fault',
+      isAbortError(error) ? 'none' : 'extract',
+    );
+    throw error;
   }
 
   onProgress({
@@ -113,21 +186,52 @@ export async function runBriefPipeline(
     message: 'Understanding the story',
     detail: 'Comprehending facts, context, and stakes…',
   });
-
   onProgress({
     phase: 'writing',
     message: 'Writing news report',
     detail: 'Rewriting into a broadcast-ready script…',
   });
 
-  const script = await understandArticle({
-    auth,
-    article,
-    reportLength: settings.reportLength,
-    outputLanguage: settings.outputLanguage,
-  });
-
-  await assertStillOnPage(tabId, expectedUrl, signal);
+  let script: NewsReportScript;
+  try {
+    const understood = await understandArticle({
+      auth,
+      article,
+      reportLength: settings.reportLength,
+      outputLanguage: settings.outputLanguage,
+      signal,
+    });
+    script = understood.script;
+    await addMoneyLine(
+      sessionId,
+      usageToLineItem('understand', COMPREHENSION_MODEL, understood.usage),
+    );
+    await assertStillOnPage(tabId, expectedUrl, signal);
+  } catch (error) {
+    if (error instanceof UnderstandError) {
+      await addMoneyLine(
+        sessionId,
+        usageToLineItem('understand', COMPREHENSION_MODEL, error.usage),
+      );
+    }
+    if (managedSessionId) {
+      const event: ManagedLifecycleEvent = isAbortError(error)
+        ? { type: 'aborted', playbackSeconds: 0 }
+        : {
+            type: 'fault',
+            stage: 'understand',
+            playbackSeconds: 0,
+          };
+      await safeReportManaged(managedSessionId, event);
+      await clearManagedTabSession(tabId, managedSessionId);
+    }
+    await finishMoneySession(
+      sessionId,
+      isAbortError(error) ? 'aborted' : 'fault',
+      isAbortError(error) ? 'none' : 'understand',
+    );
+    throw error;
+  }
 
   const result: BriefResult = {
     source: {
@@ -136,9 +240,18 @@ export async function runBriefPipeline(
       siteName: article.siteName,
     },
     script,
+    reportLength: settings.reportLength,
+    moneySessionId: sessionId,
+    managedSessionId,
   };
 
   await saveTabBriefResult(tabId, expectedUrl, result);
+  if (managedSessionId) {
+    await safeReportManaged(managedSessionId, {
+      type: 'script_ready',
+      estimatedSeconds: script.estimatedSeconds,
+    });
+  }
 
   onProgress({
     phase: 'generating_audio',
@@ -150,6 +263,24 @@ export async function runBriefPipeline(
   void browser.tabs.sendMessage(tabId, ready).catch(() => {});
 
   return result;
+}
+
+async function safeReportManaged(
+  sessionId: string,
+  event: ManagedLifecycleEvent,
+): Promise<void> {
+  try {
+    await reportManagedLifecycle(sessionId, event);
+  } catch {
+    // The capped key expires automatically; lifecycle reporting is best-effort.
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (error instanceof DOMException && error.name === 'AbortError') ||
+    (error instanceof Error && error.name === 'AbortError')
+  );
 }
 
 export async function resetBrief(tabId: number): Promise<void> {

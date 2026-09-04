@@ -16,6 +16,14 @@ const OPENAI_BASE = 'https://api.openai.com' as const;
 const OPENROUTER_BASE = 'https://openrouter.ai/api' as const;
 
 export function hasLlmAuth(settings: Settings): boolean {
+  if (settings.providerMode === 'managed') {
+    return (
+      import.meta.env.WXT_PUBLIC_MANAGED_ENABLED === 'true' &&
+      Boolean(import.meta.env.WXT_PUBLIC_CONVEX_URL?.trim()) &&
+      Boolean(import.meta.env.WXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim()) &&
+      Boolean(import.meta.env.WXT_PUBLIC_CLERK_FRONTEND_API_URL?.trim())
+    );
+  }
   return Boolean(settings.openRouterApiKey.trim() || settings.apiKey.trim());
 }
 
@@ -23,6 +31,11 @@ export function hasLlmAuth(settings: Settings): boolean {
  * Prefer OpenRouter Connect over pasted OpenAI API key.
  */
 export function resolveLlmAuth(settings: Settings): LlmAuth {
+  if (settings.providerMode === 'managed') {
+    throw new Error(
+      'Managed listening credentials must be requested for each brief.',
+    );
+  }
   const openRouterApiKey = settings.openRouterApiKey.trim();
   if (openRouterApiKey) {
     return {
@@ -56,6 +69,8 @@ export function authRequestHeaders(auth: LlmAuth): Record<string, string> {
   };
   if (auth.mode === 'openrouter') {
     headers['X-Title'] = 'Autovox';
+    headers['HTTP-Referer'] =
+      'https://github.com/tsjnsn/autovox';
   }
   return headers;
 }

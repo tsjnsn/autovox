@@ -1,0 +1,8 @@
+{
+  "fetchedAt": "2026-09-03T22:34:29.155Z",
+  "status": "no_management_key",
+  "note": "Company money pulse needs an Autovox-owned OpenRouter management key. BYOK spend stays on the user profile ledger. See docs/flywheel.md.",
+  "totalUsd": null,
+  "requestCount": null,
+  "byModel": []
+}

@@ -165,6 +165,52 @@ button:focus-visible {
   border-bottom: 2px solid var(--av-track);
 }
 
+.managed-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding-bottom: 1rem;
+  border-bottom: 2px solid var(--av-track);
+}
+
+.managed-block__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.managed-block__heading > div:first-child {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.managed-block__balance {
+  margin: 0;
+  font-family: var(--av-font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.managed-block__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+}
+
+.managed-block__active {
+  font-family: var(--av-font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--av-accent);
+}
+
 .auth-block__title {
   margin: 0;
   font-family: var(--av-font-mono);
@@ -233,4 +279,63 @@ button:disabled:hover {
 
 .btn-secondary:disabled:hover {
   background: var(--av-face);
+}
+
+.spend {
+  margin-top: 1.25rem;
+  background: var(--av-face);
+  border: 2px solid var(--av-ink);
+  box-shadow: var(--av-shadow);
+  padding: 1.25rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.spend__title {
+  margin: 0;
+  font-family: var(--av-font-mono);
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.spend__hero {
+  margin: 0;
+  font-family: var(--av-font-mono);
+  font-size: 0.85rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.spend__meter {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.spend__meter div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.spend__meter dt {
+  font-family: var(--av-font-mono);
+  font-size: 0.62rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--av-muted);
+}
+
+.spend__meter dd {
+  margin: 0;
+  font-family: var(--av-font-mono);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
 }

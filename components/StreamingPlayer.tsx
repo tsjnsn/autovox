@@ -7,6 +7,7 @@ import {
   PcmStreamPlayer,
 } from '../utils/pcmPlayer';
 import { buildTtsChunks, streamSegmentPcm } from '../utils/tts';
+import type { ProviderUsage } from '../utils/usage';
 import type { NewsReportScript, OutputLanguage, VoiceId } from '../utils/types';
 import { PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
 
@@ -17,8 +18,11 @@ interface StreamingPlayerProps {
   outputLanguage: OutputLanguage;
   autoPlay?: boolean;
   onPlaying?: () => void;
-  onDone?: () => void;
-  onError?: (message: string) => void;
+  onDone?: (playbackSeconds: number) => void;
+  onError?: (message: string, playbackSeconds: number) => void;
+  onAbort?: (playbackSeconds: number) => void;
+  /** Fired once per TTS API segment that actually spent. Cache replay does not fire. */
+  onUsage?: (usage: ProviderUsage) => void | Promise<void>;
 }
 
 type TransportPhase = 'loading' | 'playing' | 'paused' | 'ready';
@@ -48,6 +52,8 @@ export function StreamingPlayer({
   onPlaying,
   onDone,
   onError,
+  onAbort,
+  onUsage,
 }: StreamingPlayerProps) {
   const playerRef = useRef<PcmStreamPlayer | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -65,13 +71,18 @@ export function StreamingPlayer({
   const bufferedSecondsRef = useRef(0);
   const durationRef = useRef(0);
   const volumeRailRef = useRef<HTMLDivElement | null>(null);
+  const terminalRef = useRef(false);
 
   const onPlayingRef = useRef(onPlaying);
   const onDoneRef = useRef(onDone);
   const onErrorRef = useRef(onError);
+  const onAbortRef = useRef(onAbort);
+  const onUsageRef = useRef(onUsage);
   onPlayingRef.current = onPlaying;
   onDoneRef.current = onDone;
   onErrorRef.current = onError;
+  onAbortRef.current = onAbort;
+  onUsageRef.current = onUsage;
 
   const scriptKey = `${script.headline}\n${script.lede}\n${script.segments.join('\n')}`;
   const authKey = authCacheKey(auth);
@@ -187,11 +198,19 @@ export function StreamingPlayer({
         bufferedSecondsRef.current,
       );
       setPosition(endAt);
+      if (!cacheCompleteRef.current || streamingRef.current) {
+        setTransportPhase('loading');
+        return;
+      }
       setTransportPhase('ready');
-      onDoneRef.current?.();
+      terminalRef.current = true;
+      onDoneRef.current?.(endAt);
     };
 
     return () => {
+      if (!terminalRef.current) {
+        onAbortRef.current?.(player.getCurrentTime());
+      }
       abortRef.current?.abort();
       player.stop();
       if (playerRef.current === player) {
@@ -264,10 +283,16 @@ export function StreamingPlayer({
           );
           return;
         }
-        if (player.ended && phaseRef.current !== 'playing') {
+        if (
+          player.ended &&
+          cacheCompleteRef.current &&
+          !streamingRef.current &&
+          phaseRef.current !== 'playing'
+        ) {
           setPosition(player.duration || buffered);
           setTransportPhase('ready');
-          onDoneRef.current?.();
+          terminalRef.current = true;
+          onDoneRef.current?.(player.duration || buffered);
         }
       } catch (err) {
         setNeedsGesture(true);
@@ -294,6 +319,7 @@ export function StreamingPlayer({
     durationRef.current = estimatedSeconds;
     setDuration(estimatedSeconds);
     streamingRef.current = true;
+    terminalRef.current = false;
     setError('');
     setNeedsGesture(false);
     setTransportPhase('loading');
@@ -317,6 +343,7 @@ export function StreamingPlayer({
           outputLanguage: outputLanguageRef.current,
           text,
           signal: abort.signal,
+          onUsage: (usage) => onUsageRef.current?.(usage),
         })) {
           if (abort.signal.aborted || runId !== runIdRef.current) return;
 
@@ -357,9 +384,11 @@ export function StreamingPlayer({
       clearCache();
       const message =
         err instanceof Error ? err.message : 'Failed to stream audio';
+      const playbackSeconds = player.getCurrentTime();
       setError(message);
       setTransportPhase('ready');
-      onErrorRef.current?.(message);
+      terminalRef.current = true;
+      onErrorRef.current?.(message, playbackSeconds);
       player.resetPlayback();
     }
   }, [
@@ -385,7 +414,6 @@ export function StreamingPlayer({
       runIdRef.current += 1;
       streamingRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scriptKey, authKey, voice, outputLanguage, autoPlay]);
 
   const toggle = async () => {

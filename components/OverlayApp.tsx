@@ -3,13 +3,23 @@ import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
 import { PlayIcon } from './TransportIcons';
 import { samePageUrl } from '../utils/briefState';
-import { hasLlmAuth, resolveLlmAuth } from '../utils/auth';
+import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../utils/auth';
+import {
+  addMoneyLine,
+  finishMoneySession,
+  getMoneyEvent,
+  startMoneySession,
+  usageToLineItem,
+} from '../utils/money';
 import { getSettings } from '../utils/storage';
+import { TTS_MODEL } from '../utils/tts';
+import type { ProviderUsage } from '../utils/usage';
 import type {
   BriefPhase,
   BriefProgress,
   BriefResult,
   ExtensionMessage,
+  ReportLength,
   Settings,
 } from '../utils/types';
 
@@ -63,14 +73,166 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const [error, setError] = useState('');
   const [streamKey, setStreamKey] = useState(0);
   const [narrating, setNarrating] = useState(false);
+  const [managedPlayerAuth, setManagedPlayerAuth] =
+    useState<LlmAuth | null>(null);
 
   const hasScriptRef = useRef(false);
   hasScriptRef.current = Boolean(result);
+  const moneySessionRef = useRef<string | null>(null);
+  const settingsRef = useRef<Settings | null>(null);
+  const managedRuntimeSessionRef = useRef<string | null>(null);
+  settingsRef.current = settings;
+
+  useEffect(() => {
+    moneySessionRef.current = result?.moneySessionId ?? null;
+  }, [result?.moneySessionId]);
+
+  useEffect(() => {
+    if (
+      !result?.managedSessionId ||
+      settings?.providerMode !== 'managed'
+    ) {
+      managedRuntimeSessionRef.current = null;
+      setManagedPlayerAuth(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const response = (await browser.runtime.sendMessage({
+        type: 'GET_MANAGED_AUTH',
+        sessionId: result.managedSessionId,
+        estimatedSeconds: result.script.estimatedSeconds,
+        reportLength:
+          result.reportLength ?? settings.reportLength,
+        voice: settings.voice,
+        outputLanguage: settings.outputLanguage,
+      })) as {
+        ok: boolean;
+        sessionId?: string;
+        auth?: LlmAuth;
+        error?: string;
+      };
+      if (cancelled) return;
+      if (!response.ok || !response.sessionId || !response.auth) {
+        setManagedPlayerAuth(null);
+        setError(response.error ?? 'Managed listening is unavailable');
+        setPhase('error');
+        setNarrating(false);
+        return;
+      }
+      managedRuntimeSessionRef.current = response.sessionId;
+      setManagedPlayerAuth(response.auth);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    result?.managedSessionId,
+    result?.script.estimatedSeconds,
+    result?.reportLength,
+    settings?.providerMode,
+    settings?.reportLength,
+    settings?.voice,
+    settings?.outputLanguage,
+  ]);
+
+  const attachTtsUsage = useCallback(async (
+    usage: ProviderUsage,
+    originalReportLength: ReportLength | undefined,
+  ) => {
+    const latest = settingsRef.current;
+    if (!latest) return;
+
+    let authMode: 'managed' | LlmAuth['mode'];
+    if (latest.providerMode === 'managed') {
+      authMode = 'managed';
+    } else {
+      try {
+        authMode = resolveLlmAuth(latest).mode;
+      } catch {
+        return;
+      }
+    }
+
+    let sessionId = moneySessionRef.current;
+    const existing = sessionId ? await getMoneyEvent(sessionId) : null;
+    if (!existing || existing.outcome !== 'open') {
+      sessionId = await startMoneySession({
+        kind: 'tts_replay',
+        reportLength: originalReportLength ?? latest.reportLength,
+        voice: latest.voice,
+        outputLanguage: latest.outputLanguage,
+        authMode,
+      });
+      moneySessionRef.current = sessionId;
+    }
+    if (!sessionId) return;
+
+    await addMoneyLine(
+      sessionId,
+      usageToLineItem('tts', TTS_MODEL, usage),
+    );
+  }, []);
+
+  const finishTtsSession = useCallback(
+    async (
+      outcome: 'completed' | 'fault' | 'aborted',
+      faultStage: 'tts' | 'none' = 'none',
+    ) => {
+      const sessionId = moneySessionRef.current;
+      if (!sessionId) return;
+      await finishMoneySession(sessionId, outcome, faultStage);
+    },
+    [],
+  );
+
+  const reportManagedPlayback = useCallback(
+    async (
+      event:
+        | { type: 'playback_started' }
+        | { type: 'completed'; playbackSeconds: number }
+        | {
+            type: 'fault';
+            stage: 'tts';
+            playbackSeconds: number;
+          }
+        | { type: 'aborted'; playbackSeconds: number },
+    ) => {
+      const sessionId = managedRuntimeSessionRef.current;
+      if (!sessionId) return;
+      const terminal =
+        event.type === 'completed' ||
+        event.type === 'fault' ||
+        event.type === 'aborted';
+      let response: { ok?: boolean };
+      try {
+        response = (await browser.runtime.sendMessage({
+          type: 'MANAGED_LIFECYCLE',
+          sessionId,
+          event,
+        })) as { ok?: boolean };
+      } catch {
+        return;
+      }
+      if (
+        response?.ok &&
+        terminal &&
+        managedRuntimeSessionRef.current === sessionId
+      ) {
+        managedRuntimeSessionRef.current = null;
+      }
+    },
+    [],
+  );
 
   const hasAuth = settings ? hasLlmAuth(settings) : null;
   const busy = extracting || narrating;
   const playerAuth =
-    result && settings && hasLlmAuth(settings)
+    result && settings?.providerMode === 'managed'
+      ? managedPlayerAuth
+      : result && settings && hasLlmAuth(settings)
       ? (() => {
           try {
             return resolveLlmAuth(settings);
@@ -85,6 +247,9 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     const pageUrl = location.href;
 
     const resetLocalBrief = () => {
+      moneySessionRef.current = null;
+      managedRuntimeSessionRef.current = null;
+      setManagedPlayerAuth(null);
       setResult(null);
       setPhase('idle');
       setError('');
@@ -104,6 +269,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           ? state.result
           : null;
       if (matched) {
+        moneySessionRef.current = matched.moneySessionId ?? null;
         setPhase(state.progress.phase);
         setExtracting(Boolean(state.running));
         setResult(matched);
@@ -150,6 +316,9 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         if (!samePageUrl(message.result.source.url, location.href)) {
           return;
         }
+        moneySessionRef.current = message.result.moneySessionId ?? null;
+        managedRuntimeSessionRef.current = null;
+        setManagedPlayerAuth(null);
         setResult(message.result);
         setPhase('generating_audio');
         setExtracting(false);
@@ -211,6 +380,9 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     }
 
     setError('');
+    moneySessionRef.current = null;
+    managedRuntimeSessionRef.current = null;
+    setManagedPlayerAuth(null);
     setResult(null);
     setNarrating(false);
     setExtracting(true);
@@ -229,6 +401,9 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
   const clearBrief = async () => {
     await browser.runtime.sendMessage({ type: 'CLEAR_BRIEF' });
+    moneySessionRef.current = null;
+    managedRuntimeSessionRef.current = null;
+    setManagedPlayerAuth(null);
     setResult(null);
     setPhase('idle');
     setError('');
@@ -239,18 +414,38 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const handlePlaying = useCallback(() => {
     setPhase('ready');
     setNarrating(true);
-  }, []);
+    void reportManagedPlayback({ type: 'playback_started' });
+  }, [reportManagedPlayback]);
 
-  const handleDone = useCallback(() => {
+  const handleDone = useCallback((playbackSeconds: number) => {
     setPhase('ready');
     setNarrating(false);
-  }, []);
+    void finishTtsSession('completed');
+    void reportManagedPlayback({ type: 'completed', playbackSeconds });
+  }, [finishTtsSession, reportManagedPlayback]);
 
-  const handleError = useCallback((message: string) => {
+  const handleError = useCallback((message: string, playbackSeconds: number) => {
     setPhase('error');
     setNarrating(false);
     setError(message);
-  }, []);
+    void finishTtsSession('fault', 'tts');
+    void reportManagedPlayback({
+      type: 'fault',
+      stage: 'tts',
+      playbackSeconds,
+    });
+  }, [finishTtsSession, reportManagedPlayback]);
+
+  const handleAbort = useCallback((playbackSeconds: number) => {
+    void finishTtsSession('aborted');
+    void reportManagedPlayback({ type: 'aborted', playbackSeconds });
+  }, [finishTtsSession, reportManagedPlayback]);
+
+  const handleUsage = useCallback(
+    (usage: ProviderUsage) =>
+      attachTtsUsage(usage, result?.reportLength),
+    [attachTtsUsage, result?.reportLength],
+  );
 
   const label =
     hasAuth === false ? 'No auth' : meterLabel(phase, error, extracting);
@@ -273,7 +468,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         {hasPlayer ? (
           <>
             <StreamingPlayer
-              key={streamKey}
+              key={`${streamKey}:${settings!.providerMode}`}
               script={result!.script}
               auth={playerAuth!}
               voice={settings!.voice}
@@ -282,6 +477,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               onPlaying={handlePlaying}
               onDone={handleDone}
               onError={handleError}
+              onAbort={handleAbort}
+              onUsage={handleUsage}
             />
             <p className="autovox-source">
               {result!.source.siteName ? `${result!.source.siteName} · ` : ''}

@@ -4,6 +4,13 @@ import {
   modelForAuth,
   type LlmAuth,
 } from './auth';
+import {
+  emptyUsage,
+  fillUsageCost,
+  mergeStreamUsage,
+  parseProviderUsage,
+  type ProviderUsage,
+} from './usage';
 
 export class OpenAIError extends Error {
   constructor(
@@ -39,7 +46,8 @@ export async function createStructuredResponse(options: {
     schema: Record<string, unknown>;
   };
   reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
-}): Promise<string> {
+  signal?: AbortSignal;
+}): Promise<{ text: string; usage: ProviderUsage }> {
   const response = await fetch(`${authApiRoot(options.auth)}/responses`, {
     method: 'POST',
     headers: {
@@ -63,35 +71,61 @@ export async function createStructuredResponse(options: {
           schema: options.jsonSchema.schema,
         },
       },
+      ...(options.auth.mode === 'openrouter'
+        ? {
+            provider: {
+              zdr: true,
+              data_collection: 'deny',
+            },
+          }
+        : {}),
     }),
+    signal: options.signal,
   });
 
   if (!response.ok) {
     throw new OpenAIError(await readErrorMessage(response), response.status);
   }
 
-  const data = (await response.json()) as {
-    output_text?: string;
-    output?: Array<{
-      type?: string;
-      content?: Array<{ type?: string; text?: string }>;
-    }>;
-  };
-
-  if (data.output_text?.trim()) {
-    return data.output_text;
+  const data: unknown = await response.json();
+  const usage = await fillUsageCost(options.auth, parseProviderUsage(data));
+  const text = readOutputText(data);
+  if (!text) {
+    throw new OpenAIError('Empty response from comprehension model');
   }
+  return { text, usage };
+}
 
-  for (const item of data.output ?? []) {
-    if (item.type !== 'message' || !item.content) continue;
-    for (const part of item.content) {
-      if (part.type === 'output_text' && part.text?.trim()) {
-        return part.text;
+function readOutputText(data: unknown): string | null {
+  if (data === null || typeof data !== 'object' || Array.isArray(data)) {
+    return null;
+  }
+  const record = data as Record<string, unknown>;
+  if (typeof record.output_text === 'string' && record.output_text.trim()) {
+    return record.output_text;
+  }
+  if (!Array.isArray(record.output)) return null;
+  for (const item of record.output) {
+    if (item === null || typeof item !== 'object' || Array.isArray(item)) {
+      continue;
+    }
+    const row = item as Record<string, unknown>;
+    if (row.type !== 'message' || !Array.isArray(row.content)) continue;
+    for (const part of row.content) {
+      if (part === null || typeof part !== 'object' || Array.isArray(part)) {
+        continue;
+      }
+      const piece = part as Record<string, unknown>;
+      if (
+        piece.type === 'output_text' &&
+        typeof piece.text === 'string' &&
+        piece.text.trim()
+      ) {
+        return piece.text;
       }
     }
   }
-
-  throw new OpenAIError('Empty response from comprehension model');
+  return null;
 }
 
 /** OpenAI PCM16: 24 kHz, 16-bit signed LE, mono */
@@ -117,6 +151,7 @@ export async function* streamAudioChatPcm(options: {
   input: string;
   instructions: string;
   signal?: AbortSignal;
+  onUsage?: (usage: ProviderUsage) => void | Promise<void>;
 }): AsyncGenerator<Uint8Array, void, unknown> {
   const response = await fetch(
     `${authApiRoot(options.auth)}/chat/completions`,
@@ -135,6 +170,16 @@ export async function* streamAudioChatPcm(options: {
           format: 'pcm16',
         },
         stream: true,
+        // OpenAI native still needs this; OpenRouter ignores it and always sends usage.
+        stream_options: { include_usage: true },
+        ...(options.auth.mode === 'openrouter'
+          ? {
+              provider: {
+                zdr: true,
+                data_collection: 'deny',
+              },
+            }
+          : {}),
         messages: [
           {
             role: 'system',
@@ -161,6 +206,8 @@ export async function* streamAudioChatPcm(options: {
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
+  let usage = emptyUsage();
+  let streamError: unknown;
 
   try {
     while (true) {
@@ -191,6 +238,8 @@ export async function* streamAudioChatPcm(options: {
           continue;
         }
 
+        usage = mergeStreamUsage(usage, event);
+
         if (event.error?.message) {
           throw new OpenAIError(event.error.message);
         }
@@ -201,7 +250,25 @@ export async function* streamAudioChatPcm(options: {
         }
       }
     }
+  } catch (error) {
+    streamError = error;
   } finally {
     reader.releaseLock();
+  }
+
+  const hasUsage =
+    usage.costKnown ||
+    Boolean(usage.generationId) ||
+    usage.inputTokens !== undefined;
+  if (options.onUsage && hasUsage) {
+    try {
+      await options.onUsage(await fillUsageCost(options.auth, usage));
+    } catch {
+      // Spend records must not break playback.
+    }
+  }
+
+  if (streamError) {
+    throw streamError;
   }
 }
