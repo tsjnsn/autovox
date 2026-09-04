@@ -6,6 +6,16 @@ import {
   normalizePageUrl,
   setTabProgress,
 } from '../utils/briefState';
+import {
+  createManagedCheckout,
+  ensureManagedAccount,
+  getManagedAccountStatus,
+  getManagedSessionAuth,
+  isManagedConfigured,
+  openManagedSession,
+  reportManagedLifecycle,
+} from '../utils/managed';
+import { getSettings } from '../utils/storage';
 import type { BriefProgress, ExtensionMessage } from '../utils/types';
 
 const CONTEXT_MENU_VOX_PAGE = 'autovox-vox-page';
@@ -45,8 +55,23 @@ function abortTabBrief(tabId: number): void {
 
 async function onTabUrlChanged(tabId: number, url: string): Promise<void> {
   abortTabBrief(tabId);
+  await abortManagedSessionForTab(tabId);
   await clearTabIfUrlChanged(tabId, url);
   notifyTab(tabId, { type: 'BRIEF_RESET' });
+}
+
+async function abortManagedSessionForTab(tabId: number): Promise<void> {
+  const state = await getTabBrief(tabId);
+  const sessionId = state.result?.managedSessionId;
+  if (!sessionId) return;
+  try {
+    await reportManagedLifecycle(sessionId, {
+      type: 'aborted',
+      playbackSeconds: 0,
+    });
+  } catch {
+    // The session key is capped and expires automatically.
+  }
 }
 
 async function toggleOverlayOnTab(tabId: number): Promise<void> {
@@ -87,6 +112,7 @@ async function startBriefForTab(
   }
 
   abortTabBrief(tabId);
+  await abortManagedSessionForTab(tabId);
   await clearTabBrief(tabId);
   const controller = new AbortController();
   abortByTab.set(tabId, controller);
@@ -205,7 +231,10 @@ export default defineBackground(() => {
 
   browser.tabs.onRemoved.addListener((tabId) => {
     abortTabBrief(tabId);
-    void clearTabBrief(tabId);
+    void (async () => {
+      await abortManagedSessionForTab(tabId);
+      await clearTabBrief(tabId);
+    })();
   });
 
   browser.tabs.onUpdated.addListener((tabId, changeInfo) => {
@@ -263,11 +292,122 @@ export default defineBackground(() => {
       return true;
     }
 
+    if (msg.type === 'GET_MANAGED_ACCOUNT') {
+      void (async () => {
+        try {
+          const status = await getManagedAccountStatus();
+          sendResponse({ ok: true, status });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Could not load managed credits',
+          });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'ENSURE_MANAGED_ACCOUNT') {
+      void (async () => {
+        try {
+          const status = await ensureManagedAccount();
+          sendResponse({ ok: true, status });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Could not initialize managed listening',
+          });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'START_MANAGED_CHECKOUT') {
+      void (async () => {
+        try {
+          const url = await createManagedCheckout();
+          await browser.tabs.create({ url });
+          sendResponse({ ok: true });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Could not start checkout',
+          });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'GET_MANAGED_AUTH') {
+      void (async () => {
+        try {
+          if (!isManagedConfigured()) {
+            throw new Error('Managed listening is not configured');
+          }
+          let sessionId = msg.sessionId;
+          let auth = await getManagedSessionAuth(sessionId);
+          if (!auth) {
+            const settings = await getSettings();
+            const replay = await openManagedSession({
+              kind: 'tts_replay',
+              reportLength: settings.reportLength,
+              voice: settings.voice,
+              outputLanguage: settings.outputLanguage,
+            });
+            sessionId = replay.sessionId;
+            auth = replay.auth;
+            await reportManagedLifecycle(sessionId, {
+              type: 'script_ready',
+              estimatedSeconds: msg.estimatedSeconds,
+            });
+          }
+          sendResponse({ ok: true, sessionId, auth });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Could not authorize managed narration',
+          });
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'MANAGED_LIFECYCLE') {
+      void (async () => {
+        try {
+          await reportManagedLifecycle(msg.sessionId, msg.event);
+          sendResponse({ ok: true });
+        } catch (error) {
+          sendResponse({
+            ok: false,
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Could not report managed listening',
+          });
+        }
+      })();
+      return true;
+    }
+
     if (msg.type === 'CLEAR_BRIEF') {
       void (async () => {
         const tabId = await resolveTabId(undefined, sender.tab?.id);
         if (tabId != null) {
           abortTabBrief(tabId);
+          await abortManagedSessionForTab(tabId);
           await resetBrief(tabId);
         }
         sendResponse({ ok: true });

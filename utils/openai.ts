@@ -70,6 +70,14 @@ export async function createStructuredResponse(options: {
           schema: options.jsonSchema.schema,
         },
       },
+      ...(options.auth.mode === 'openrouter'
+        ? {
+            provider: {
+              zdr: true,
+              data_collection: 'deny',
+            },
+          }
+        : {}),
     }),
   });
 
@@ -162,6 +170,14 @@ export async function* streamAudioChatPcm(options: {
         stream: true,
         // OpenAI native still needs this; OpenRouter ignores it and always sends usage.
         stream_options: { include_usage: true },
+        ...(options.auth.mode === 'openrouter'
+          ? {
+              provider: {
+                zdr: true,
+                data_collection: 'deny',
+              },
+            }
+          : {}),
         messages: [
           {
             role: 'system',

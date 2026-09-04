@@ -10,7 +10,7 @@ const STALE_OPEN_MS = 60 * 60 * 1000;
 export type MoneyOutcome = 'open' | 'completed' | 'fault' | 'aborted';
 export type MoneyFaultStage = 'extract' | 'understand' | 'tts' | 'none';
 export type MoneyEventKind = 'brief' | 'tts_replay';
-export type MoneyAuthMode = LlmAuth['mode'];
+export type MoneyAuthMode = LlmAuth['mode'] | 'managed';
 
 export type MoneyLineItem = {
   kind: 'understand' | 'tts';

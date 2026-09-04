@@ -72,26 +72,76 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const [error, setError] = useState('');
   const [streamKey, setStreamKey] = useState(0);
   const [narrating, setNarrating] = useState(false);
+  const [managedPlayerAuth, setManagedPlayerAuth] =
+    useState<LlmAuth | null>(null);
 
   const hasScriptRef = useRef(false);
   hasScriptRef.current = Boolean(result);
   const moneySessionRef = useRef<string | null>(null);
   const settingsRef = useRef<Settings | null>(null);
+  const managedRuntimeSessionRef = useRef<string | null>(null);
   settingsRef.current = settings;
 
   useEffect(() => {
     moneySessionRef.current = result?.moneySessionId ?? null;
   }, [result?.moneySessionId]);
 
+  useEffect(() => {
+    if (
+      !result?.managedSessionId ||
+      settings?.providerMode !== 'managed'
+    ) {
+      managedRuntimeSessionRef.current = null;
+      setManagedPlayerAuth(null);
+      return;
+    }
+
+    let cancelled = false;
+    void (async () => {
+      const response = (await browser.runtime.sendMessage({
+        type: 'GET_MANAGED_AUTH',
+        sessionId: result.managedSessionId,
+        estimatedSeconds: result.script.estimatedSeconds,
+      })) as {
+        ok: boolean;
+        sessionId?: string;
+        auth?: LlmAuth;
+        error?: string;
+      };
+      if (cancelled) return;
+      if (!response.ok || !response.sessionId || !response.auth) {
+        setManagedPlayerAuth(null);
+        setError(response.error ?? 'Managed listening is unavailable');
+        setPhase('error');
+        setNarrating(false);
+        return;
+      }
+      managedRuntimeSessionRef.current = response.sessionId;
+      setManagedPlayerAuth(response.auth);
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    result?.managedSessionId,
+    result?.script.estimatedSeconds,
+    settings?.providerMode,
+  ]);
+
   const attachTtsUsage = useCallback(async (usage: ProviderUsage) => {
     const latest = settingsRef.current;
     if (!latest) return;
 
-    let auth: LlmAuth;
-    try {
-      auth = resolveLlmAuth(latest);
-    } catch {
-      return;
+    let authMode: 'managed' | LlmAuth['mode'];
+    if (latest.providerMode === 'managed') {
+      authMode = 'managed';
+    } else {
+      try {
+        authMode = resolveLlmAuth(latest).mode;
+      } catch {
+        return;
+      }
     }
 
     let sessionId = moneySessionRef.current;
@@ -102,7 +152,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         reportLength: latest.reportLength,
         voice: latest.voice,
         outputLanguage: latest.outputLanguage,
-        authMode: auth.mode,
+        authMode,
       });
       moneySessionRef.current = sessionId;
     }
@@ -116,7 +166,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
   const finishTtsSession = useCallback(
     async (
-      outcome: 'completed' | 'fault',
+      outcome: 'completed' | 'fault' | 'aborted',
       faultStage: 'tts' | 'none' = 'none',
     ) => {
       const sessionId = moneySessionRef.current;
@@ -126,10 +176,45 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     [],
   );
 
+  const reportManagedPlayback = useCallback(
+    async (
+      event:
+        | { type: 'playback_started' }
+        | { type: 'completed'; playbackSeconds: number }
+        | {
+            type: 'fault';
+            stage: 'tts';
+            playbackSeconds: number;
+          }
+        | { type: 'aborted'; playbackSeconds: number },
+    ) => {
+      const sessionId = managedRuntimeSessionRef.current;
+      if (!sessionId) return;
+      const terminal =
+        event.type === 'completed' ||
+        event.type === 'fault' ||
+        event.type === 'aborted';
+      try {
+        await browser.runtime.sendMessage({
+          type: 'MANAGED_LIFECYCLE',
+          sessionId,
+          event,
+        });
+      } finally {
+        if (terminal) {
+          managedRuntimeSessionRef.current = null;
+        }
+      }
+    },
+    [],
+  );
+
   const hasAuth = settings ? hasLlmAuth(settings) : null;
   const busy = extracting || narrating;
   const playerAuth =
-    result && settings && hasLlmAuth(settings)
+    result && settings?.providerMode === 'managed'
+      ? managedPlayerAuth
+      : result && settings && hasLlmAuth(settings)
       ? (() => {
           try {
             return resolveLlmAuth(settings);
@@ -145,6 +230,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
     const resetLocalBrief = () => {
       moneySessionRef.current = null;
+      managedRuntimeSessionRef.current = null;
+      setManagedPlayerAuth(null);
       setResult(null);
       setPhase('idle');
       setError('');
@@ -212,6 +299,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           return;
         }
         moneySessionRef.current = message.result.moneySessionId ?? null;
+        managedRuntimeSessionRef.current = null;
+        setManagedPlayerAuth(null);
         setResult(message.result);
         setPhase('generating_audio');
         setExtracting(false);
@@ -274,6 +363,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
     setError('');
     moneySessionRef.current = null;
+    managedRuntimeSessionRef.current = null;
+    setManagedPlayerAuth(null);
     setResult(null);
     setNarrating(false);
     setExtracting(true);
@@ -293,6 +384,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const clearBrief = async () => {
     await browser.runtime.sendMessage({ type: 'CLEAR_BRIEF' });
     moneySessionRef.current = null;
+    managedRuntimeSessionRef.current = null;
+    setManagedPlayerAuth(null);
     setResult(null);
     setPhase('idle');
     setError('');
@@ -303,20 +396,32 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const handlePlaying = useCallback(() => {
     setPhase('ready');
     setNarrating(true);
-  }, []);
+    void reportManagedPlayback({ type: 'playback_started' });
+  }, [reportManagedPlayback]);
 
-  const handleDone = useCallback(() => {
+  const handleDone = useCallback((playbackSeconds: number) => {
     setPhase('ready');
     setNarrating(false);
     void finishTtsSession('completed');
-  }, [finishTtsSession]);
+    void reportManagedPlayback({ type: 'completed', playbackSeconds });
+  }, [finishTtsSession, reportManagedPlayback]);
 
-  const handleError = useCallback((message: string) => {
+  const handleError = useCallback((message: string, playbackSeconds: number) => {
     setPhase('error');
     setNarrating(false);
     setError(message);
     void finishTtsSession('fault', 'tts');
-  }, [finishTtsSession]);
+    void reportManagedPlayback({
+      type: 'fault',
+      stage: 'tts',
+      playbackSeconds,
+    });
+  }, [finishTtsSession, reportManagedPlayback]);
+
+  const handleAbort = useCallback((playbackSeconds: number) => {
+    void finishTtsSession('aborted');
+    void reportManagedPlayback({ type: 'aborted', playbackSeconds });
+  }, [finishTtsSession, reportManagedPlayback]);
 
   const handleUsage = useCallback(
     (usage: ProviderUsage) => attachTtsUsage(usage),
@@ -353,6 +458,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               onPlaying={handlePlaying}
               onDone={handleDone}
               onError={handleError}
+              onAbort={handleAbort}
               onUsage={handleUsage}
             />
             <p className="autovox-source">

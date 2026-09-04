@@ -1,4 +1,8 @@
-import { hasLlmAuth, resolveLlmAuth } from './auth';
+import {
+  hasLlmAuth,
+  resolveLlmAuth,
+  type LlmAuth,
+} from './auth';
 import {
   clearTabBrief,
   normalizePageUrl,
@@ -12,12 +16,17 @@ import {
   startMoneySession,
   usageToLineItem,
 } from './money';
+import {
+  openManagedSession,
+  reportManagedLifecycle,
+} from './managed';
 import { getSettings } from './storage';
 import type {
   BriefProgress,
   BriefResult,
   ExtractedArticle,
   ExtensionMessage,
+  ManagedLifecycleEvent,
   NewsReportScript,
 } from './types';
 import {
@@ -103,13 +112,15 @@ export async function runBriefPipeline(
       'Connect with OpenRouter or add an OpenAI API key in Options before briefing a page.',
     );
   }
-  const auth = resolveLlmAuth(settings);
+  const managed = settings.providerMode === 'managed';
+  let auth: LlmAuth | null = managed ? null : resolveLlmAuth(settings);
+  let managedSessionId: string | undefined;
   const sessionId = await startMoneySession({
     kind: 'brief',
     reportLength: settings.reportLength,
     voice: settings.voice,
     outputLanguage: settings.outputLanguage,
-    authMode: auth.mode,
+    authMode: managed ? 'managed' : auth!.mode,
   });
   await setTabMoneySession(tabId, expectedUrl, sessionId);
 
@@ -147,6 +158,26 @@ export async function runBriefPipeline(
     detail: 'Rewriting into a broadcast-ready script…',
   });
 
+  if (managed) {
+    try {
+      const funded = await openManagedSession({
+        kind: 'brief',
+        reportLength: settings.reportLength,
+        voice: settings.voice,
+        outputLanguage: settings.outputLanguage,
+      });
+      auth = funded.auth;
+      managedSessionId = funded.sessionId;
+    } catch (error) {
+      await finishMoneySession(sessionId, 'fault', 'understand');
+      throw error;
+    }
+  }
+  if (!auth) {
+    await finishMoneySession(sessionId, 'fault', 'understand');
+    throw new Error('Could not authorize this brief');
+  }
+
   let script: NewsReportScript;
   try {
     const understood = await understandArticle({
@@ -168,6 +199,17 @@ export async function runBriefPipeline(
         usageToLineItem('understand', COMPREHENSION_MODEL, error.usage),
       );
     }
+    if (managedSessionId) {
+      await safeReportManaged(managedSessionId, {
+        type: isAbortError(error) ? 'aborted' : 'fault',
+        ...(isAbortError(error)
+          ? { playbackSeconds: 0 }
+          : {
+              stage: 'understand' as const,
+              playbackSeconds: 0,
+            }),
+      });
+    }
     await finishMoneySession(
       sessionId,
       isAbortError(error) ? 'aborted' : 'fault',
@@ -184,9 +226,16 @@ export async function runBriefPipeline(
     },
     script,
     moneySessionId: sessionId,
+    managedSessionId,
   };
 
   await saveTabBriefResult(tabId, expectedUrl, result);
+  if (managedSessionId) {
+    await safeReportManaged(managedSessionId, {
+      type: 'script_ready',
+      estimatedSeconds: script.estimatedSeconds,
+    });
+  }
 
   onProgress({
     phase: 'generating_audio',
@@ -198,6 +247,17 @@ export async function runBriefPipeline(
   void browser.tabs.sendMessage(tabId, ready).catch(() => {});
 
   return result;
+}
+
+async function safeReportManaged(
+  sessionId: string,
+  event: ManagedLifecycleEvent,
+): Promise<void> {
+  try {
+    await reportManagedLifecycle(sessionId, event);
+  } catch {
+    // The capped key expires automatically; lifecycle reporting is best-effort.
+  }
 }
 
 function isAbortError(error: unknown): boolean {

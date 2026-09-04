@@ -1,0 +1,68 @@
+name: Economics operator
+
+on:
+  schedule:
+    - cron: "10 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  decide:
+    runs-on: ubuntu-latest
+    env:
+      AUTOVOX_CONTROL_PLANE_SITE_URL: ${{ secrets.AUTOVOX_CONTROL_PLANE_SITE_URL }}
+      AUTOVOX_OPERATOR_SECRET: ${{ secrets.AUTOVOX_OPERATOR_SECRET }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/setup@v1
+        with:
+          runtime: node@22
+          cache: true
+
+      - name: Evaluate business economics
+        id: pulse
+        run: |
+          set -o pipefail
+          pnpm economics-pulse | tee /tmp/economics-pulse.log
+          grep '^status=' /tmp/economics-pulse.log >> "$GITHUB_OUTPUT"
+          grep '^decision=' /tmp/economics-pulse.log >> "$GITHUB_OUTPUT"
+          grep '^changed=' /tmp/economics-pulse.log >> "$GITHUB_OUTPUT"
+
+      - name: Commit material economics change
+        if: steps.pulse.outputs.changed == 'true'
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add store/economics.json store/decision.md
+          git diff --cached --quiet || git commit -m "Update economics decision"
+          git push
+
+      - name: Upsert bounded operator issue
+        if: steps.pulse.outputs.status == 'ok'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create operator \
+            --description "Bounded economics-driven product decision" \
+            --color E23B2F \
+            --force
+
+          EXISTING="$(gh issue list \
+            --label operator \
+            --state open \
+            --search 'Operator decision in:title' \
+            --json number \
+            --jq '.[0].number // empty')"
+
+          if [ -n "$EXISTING" ]; then
+            gh issue edit "$EXISTING" --body-file store/decision.md
+          else
+            gh issue create \
+              --title "Operator decision — Autovox economics" \
+              --label operator \
+              --body-file store/decision.md
+          fi

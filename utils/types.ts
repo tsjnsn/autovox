@@ -12,6 +12,7 @@ export {
 } from './languages';
 
 export type ReportLength = 'short' | 'standard' | 'deep';
+export type ProviderMode = 'managed' | 'byok';
 
 /** Voices supported by gpt-audio-mini (Chat Completions audio). */
 export type VoiceId =
@@ -28,6 +29,8 @@ export type VoiceId =
   | 'verse';
 
 export interface Settings {
+  /** Managed Autovox credits or user-funded provider credentials. */
+  providerMode: ProviderMode;
   /** Direct OpenAI API key fallback (sk-…). */
   apiKey: string;
   /** OpenRouter API key from OAuth Connect (preferred when set). */
@@ -80,7 +83,20 @@ export interface BriefResult {
   script: NewsReportScript;
   /** Local spend session — no page content is attached to the ledger. */
   moneySessionId?: string;
+  /** Server-side funded session. The short-lived key is never persisted here. */
+  managedSessionId?: string;
 }
+
+export type ManagedLifecycleEvent =
+  | { type: 'script_ready'; estimatedSeconds: number }
+  | { type: 'playback_started' }
+  | { type: 'completed'; playbackSeconds: number }
+  | {
+      type: 'fault';
+      stage: 'extract' | 'understand' | 'tts' | 'none';
+      playbackSeconds: number;
+    }
+  | { type: 'aborted'; playbackSeconds: number };
 
 export type ExtensionMessage =
   | { type: 'PING' }
@@ -89,6 +105,19 @@ export type ExtensionMessage =
   | { type: 'OPEN_UI' }
   | { type: 'CLOSE_UI' }
   | { type: 'OPEN_OPTIONS' }
+  | { type: 'GET_MANAGED_ACCOUNT' }
+  | { type: 'ENSURE_MANAGED_ACCOUNT' }
+  | { type: 'START_MANAGED_CHECKOUT' }
+  | {
+      type: 'GET_MANAGED_AUTH';
+      sessionId: string;
+      estimatedSeconds: number;
+    }
+  | {
+      type: 'MANAGED_LIFECYCLE';
+      sessionId: string;
+      event: ManagedLifecycleEvent;
+    }
   | { type: 'START_BRIEF'; tabId?: number }
   /** Brief state for the sender's tab + page URL only. */
   | { type: 'GET_BRIEF_STATE' }
@@ -116,6 +145,7 @@ export const VOICES: { id: VoiceId; label: string }[] = [
 ];
 
 export const DEFAULT_SETTINGS: Settings = {
+  providerMode: 'byok',
   apiKey: '',
   openRouterApiKey: '',
   voice: 'sage',

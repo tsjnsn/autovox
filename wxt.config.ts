@@ -7,6 +7,13 @@ const BROAD_HOST_PERMISSIONS = new Set([
   'http://*/*',
   'https://*/*',
 ]);
+const MANAGED_HOST_PERMISSIONS =
+  process.env.WXT_PUBLIC_MANAGED_ENABLED === 'true'
+    ? [
+        'https://*.convex.cloud/*',
+        'https://*.clerk.accounts.dev/*',
+      ]
+    : [];
 
 export default defineConfig({
   modules: ['@wxt-dev/module-react'],
@@ -18,6 +25,7 @@ export default defineConfig({
     host_permissions: [
       'https://openrouter.ai/*',
       'https://api.openai.com/*',
+      ...MANAGED_HOST_PERMISSIONS,
     ],
     action: {
       default_title: 'Autovox',
