@@ -1,11 +1,11 @@
 {
-  "fetchedAt": "2026-09-10T06:43:54.144Z",
+  "fetchedAt": "2026-09-15T06:45:33.929Z",
   "extensionId": "aodlbiejdiibbpemagfngbdhaappejda",
   "name": "Autovox",
   "listingUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda",
   "reviewsUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda/reviews",
   "version": "0.2.0",
-  "userCount": null,
+  "userCount": 4,
   "rating": null,
   "reviewCount": null,
   "size": "184KiB",
@@ -15,8 +15,8 @@
   "privacyPolicyUrl": "https://raw.githubusercontent.com/tsjnsn/autovox/refs/heads/main/PRIVACY.md",
   "reviews": [],
   "previous": {
-    "fetchedAt": "2026-09-09T06:44:28.282Z",
-    "userCount": 4,
+    "fetchedAt": "2026-09-10T06:43:54.144Z",
+    "userCount": null,
     "rating": null,
     "reviewCount": null,
     "version": "0.2.0"
