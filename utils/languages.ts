@@ -1,6 +1,6 @@
 /**
  * Languages supported by OpenAI audio models (Whisper / TTS family).
- * gpt-audio-mini can narrate text in these languages; voices are English-optimized
+ * OpenAI audio models (default gpt-audio-mini) can narrate text in these languages; voices are English-optimized
  * but generally handle other languages well.
  */
 export type OutputLanguage =

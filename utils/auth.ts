@@ -55,10 +55,13 @@ export function resolveLlmAuth(settings: Settings): LlmAuth {
   );
 }
 
-/** OpenRouter uses provider/model ids. */
+/** OpenRouter uses provider/model ids; OpenAI uses bare ids. */
 export function modelForAuth(auth: LlmAuth, model: string): string {
   if (auth.mode === 'openrouter' && !model.includes('/')) {
     return `openai/${model}`;
+  }
+  if (auth.mode === 'apiKey' && model.startsWith('openai/')) {
+    return model.slice('openai/'.length);
   }
   return model;
 }

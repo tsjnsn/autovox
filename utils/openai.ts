@@ -34,7 +34,7 @@ async function readErrorMessage(response: Response): Promise<string> {
 }
 
 /**
- * Responses API with structured JSON output (preferred for GPT-5.6+).
+ * Responses API with structured JSON output (preferred for GPT-5+ reasoning models).
  */
 export async function createStructuredResponse(options: {
   auth: LlmAuth;
@@ -142,7 +142,7 @@ function base64ToBytes(base64: string): Uint8Array {
 }
 
 /**
- * Stream PCM16 audio from gpt-audio-mini (Chat Completions, SSE).
+ * Stream PCM16 audio from a Chat Completions audio model (SSE).
  */
 export async function* streamAudioChatPcm(options: {
   auth: LlmAuth;

@@ -4,6 +4,8 @@ import {
   DEFAULT_OUTPUT_LANGUAGE,
 } from './languages';
 
+import { DEFAULT_COMPREHENSION_MODEL, DEFAULT_TTS_MODEL } from './models';
+
 export type { OutputLanguage };
 export {
   coerceOutputLanguage,
@@ -14,7 +16,7 @@ export {
 export type ReportLength = 'short' | 'standard' | 'deep';
 export type ProviderMode = 'managed' | 'byok';
 
-/** Voices supported by gpt-audio-mini (Chat Completions audio). */
+/** Voices supported by OpenAI Chat Completions audio models. */
 export type VoiceId =
   | 'alloy'
   | 'ash'
@@ -39,6 +41,10 @@ export interface Settings {
   reportLength: ReportLength;
   /** Target language for the news report and narration. */
   outputLanguage: OutputLanguage;
+  /** BYOK comprehension model id (managed listening ignores it). */
+  comprehensionModel: string;
+  /** BYOK narration model id (managed listening ignores it). */
+  ttsModel: string;
 }
 
 export interface ExtractedArticle {
@@ -156,6 +162,8 @@ export const DEFAULT_SETTINGS: Settings = {
   voice: 'sage',
   reportLength: 'standard',
   outputLanguage: DEFAULT_OUTPUT_LANGUAGE,
+  comprehensionModel: DEFAULT_COMPREHENSION_MODEL,
+  ttsModel: DEFAULT_TTS_MODEL,
 };
 
 const VOICE_IDS = new Set<string>(VOICES.map((v) => v.id));

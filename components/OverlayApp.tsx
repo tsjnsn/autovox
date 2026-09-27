@@ -12,7 +12,7 @@ import {
   usageToLineItem,
 } from '../utils/money';
 import { getSettings } from '../utils/storage';
-import { TTS_MODEL } from '../utils/tts';
+import { activeModels } from '../utils/models';
 import type { ProviderUsage } from '../utils/usage';
 import type {
   BriefPhase,
@@ -172,7 +172,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
     await addMoneyLine(
       sessionId,
-      usageToLineItem('tts', TTS_MODEL, usage),
+      usageToLineItem('tts', activeModels(latest).tts, usage),
     );
   }, []);
 
@@ -471,6 +471,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               key={`${streamKey}:${settings!.providerMode}`}
               script={result!.script}
               auth={playerAuth!}
+              model={activeModels(settings!).tts}
               voice={settings!.voice}
               outputLanguage={settings!.outputLanguage}
               autoPlay
