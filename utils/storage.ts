@@ -8,6 +8,10 @@ import {
 
 const SETTINGS_KEY = 'autovoxSettings';
 
+function coerceModel(value: unknown, fallback: string): string {
+  return typeof value === 'string' && value.trim() ? value.trim() : fallback;
+}
+
 export async function getSettings(): Promise<Settings> {
   const stored = await browser.storage.local.get(SETTINGS_KEY);
   const value = stored[SETTINGS_KEY] as Partial<Settings> | undefined;
@@ -34,6 +38,11 @@ export async function getSettings(): Promise<Settings> {
     voice: coerceVoice(merged.voice),
     reportLength: merged.reportLength ?? DEFAULT_SETTINGS.reportLength,
     outputLanguage: coerceOutputLanguage(merged.outputLanguage),
+    comprehensionModel: coerceModel(
+      merged.comprehensionModel,
+      DEFAULT_SETTINGS.comprehensionModel,
+    ),
+    ttsModel: coerceModel(merged.ttsModel, DEFAULT_SETTINGS.ttsModel),
   };
 }
 

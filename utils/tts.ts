@@ -5,9 +5,6 @@ import type { ProviderUsage } from './usage';
 import type { NewsReportScript, OutputLanguage, VoiceId } from './types';
 import { scriptToSpokenText } from './understand';
 
-/** Chat Completions audio model for spoken narration */
-export const TTS_MODEL = 'gpt-audio-mini';
-
 const MAX_CHARS = 2800;
 
 const NEWS_ANCHOR_BASE = `You are a calm, clear broadcast news anchor.
@@ -82,6 +79,7 @@ export function buildTtsChunks(script: NewsReportScript): string[] {
 
 export function streamSegmentPcm(options: {
   auth: LlmAuth;
+  model: string;
   voice: VoiceId;
   text: string;
   outputLanguage: OutputLanguage;
@@ -90,7 +88,7 @@ export function streamSegmentPcm(options: {
 }): AsyncGenerator<Uint8Array, void, unknown> {
   return streamAudioChatPcm({
     auth: options.auth,
-    model: TTS_MODEL,
+    model: options.model,
     voice: options.voice,
     input: options.text,
     instructions: buildNewsAnchorInstructions(options.outputLanguage),

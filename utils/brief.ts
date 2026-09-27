@@ -31,11 +31,8 @@ import type {
   ManagedLifecycleEvent,
   NewsReportScript,
 } from './types';
-import {
-  COMPREHENSION_MODEL,
-  UnderstandError,
-  understandArticle,
-} from './understand';
+import { activeModels } from './models';
+import { UnderstandError, understandArticle } from './understand';
 
 type ProgressFn = (progress: BriefProgress) => void;
 
@@ -192,10 +189,12 @@ export async function runBriefPipeline(
     detail: 'Rewriting into a broadcast-ready script…',
   });
 
+  const comprehensionModel = activeModels(settings).comprehension;
   let script: NewsReportScript;
   try {
     const understood = await understandArticle({
       auth,
+      model: comprehensionModel,
       article,
       reportLength: settings.reportLength,
       outputLanguage: settings.outputLanguage,
@@ -204,14 +203,14 @@ export async function runBriefPipeline(
     script = understood.script;
     await addMoneyLine(
       sessionId,
-      usageToLineItem('understand', COMPREHENSION_MODEL, understood.usage),
+      usageToLineItem('understand', comprehensionModel, understood.usage),
     );
     await assertStillOnPage(tabId, expectedUrl, signal);
   } catch (error) {
     if (error instanceof UnderstandError) {
       await addMoneyLine(
         sessionId,
-        usageToLineItem('understand', COMPREHENSION_MODEL, error.usage),
+        usageToLineItem('understand', comprehensionModel, error.usage),
       );
     }
     if (managedSessionId) {

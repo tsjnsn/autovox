@@ -1,8 +1,11 @@
 import {
   useCallback,
   useEffect,
+  useRef,
   useState,
+  type Dispatch,
   type FormEvent,
+  type SetStateAction,
 } from 'react';
 import {
   Show,
@@ -10,6 +13,7 @@ import {
   UserButton,
   useAuth,
 } from '@clerk/chrome-extension';
+import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../../utils/auth';
 import { connectOpenRouter } from '../../utils/connect';
 import {
   isManagedConfigured,
@@ -21,6 +25,17 @@ import {
   summarizeMoneyLedger,
   type MoneySummary,
 } from '../../utils/money';
+import {
+  catalogModelId,
+  DEFAULT_COMPREHENSION_MODEL,
+  DEFAULT_TTS_MODEL,
+  fetchModelCatalog,
+  getCachedModelCatalog,
+  MODEL_CATALOG_REFRESH_MS,
+  modelOptions,
+  saveModelCatalog,
+  type ModelCatalog,
+} from '../../utils/models';
 import { getSettings, saveSettings } from '../../utils/storage';
 import {
   DEFAULT_SETTINGS,
@@ -158,6 +173,241 @@ function ManagedPanel({
         </div>
       </Show>
       {error ? <p className="hint warn">{error}</p> : null}
+    </section>
+  );
+}
+
+/** Wait for typing to settle before fetching with a pasted key. */
+const CATALOG_AUTH_DEBOUNCE_MS = 600;
+/** Window focus refetches only when the catalog is older than this. */
+const CATALOG_FOCUS_STALE_MS = 60 * 1000;
+
+function catalogAuth(settings: Settings): LlmAuth | null {
+  if (settings.providerMode !== 'byok' || !hasLlmAuth(settings)) return null;
+  try {
+    return resolveLlmAuth(settings);
+  } catch {
+    return null;
+  }
+}
+
+function formatAge(fetchedAt: number, now: number): string {
+  const minutes = Math.floor((now - fetchedAt) / 60_000);
+  if (minutes < 1) return 'just now';
+  if (minutes < 60) return `${minutes} min ago`;
+  const hours = Math.floor(minutes / 60);
+  return `${hours} h ago`;
+}
+
+/** Live provider model list: cached, refetched on auth change, focus, and a timer. */
+function useModelCatalog(auth: LlmAuth | null) {
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [now, setNow] = useState(() => Date.now());
+  const catalogRef = useRef<ModelCatalog | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  catalogRef.current = catalog;
+
+  const authMode = auth?.mode ?? null;
+  const authKey = auth ? `${auth.mode}:${auth.apiKey}` : '';
+  const authRef = useRef(auth);
+  authRef.current = auth;
+
+  const refresh = useCallback(async () => {
+    const current = authRef.current;
+    if (!current) return;
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
+    setLoading(true);
+    try {
+      const next = await fetchModelCatalog(current, abort.signal);
+      if (abort.signal.aborted) return;
+      setCatalog(next);
+      setError('');
+      setNow(Date.now());
+      await saveModelCatalog(next);
+    } catch (fetchError) {
+      if (abort.signal.aborted) return;
+      setError(
+        fetchError instanceof Error
+          ? fetchError.message
+          : 'Could not load models',
+      );
+    } finally {
+      if (!abort.signal.aborted) setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!authMode) return;
+    void getCachedModelCatalog().then((cached) => {
+      if (cached?.source === authMode && !catalogRef.current) {
+        setCatalog(cached);
+      }
+    });
+  }, [authMode]);
+
+  useEffect(() => {
+    setCatalog((existing) =>
+      existing && existing.source === authMode ? existing : null,
+    );
+    setError('');
+    if (!authKey) {
+      abortRef.current?.abort();
+      setLoading(false);
+      return;
+    }
+    const timer = window.setTimeout(
+      () => void refresh(),
+      CATALOG_AUTH_DEBOUNCE_MS,
+    );
+    const interval = window.setInterval(
+      () => void refresh(),
+      MODEL_CATALOG_REFRESH_MS,
+    );
+    const onFocus = () => {
+      const fetchedAt = catalogRef.current?.fetchedAt ?? 0;
+      if (Date.now() - fetchedAt > CATALOG_FOCUS_STALE_MS) void refresh();
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.clearTimeout(timer);
+      window.clearInterval(interval);
+      window.removeEventListener('focus', onFocus);
+      abortRef.current?.abort();
+    };
+  }, [authKey, authMode, refresh]);
+
+  useEffect(() => {
+    const tick = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(tick);
+  }, []);
+
+  return { catalog, loading, error, now, refresh };
+}
+
+function ModelSelect({
+  label,
+  hint,
+  value,
+  fallback,
+  options,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: string;
+  fallback: string;
+  options: ModelCatalog['comprehension'] | null;
+  onChange: (model: string) => void;
+}) {
+  const selected = value || fallback;
+  return (
+    <label>
+      {label}
+      <select
+        value={selected}
+        disabled={!options}
+        onChange={(e) => onChange(e.target.value)}
+      >
+        {modelOptions(options ?? [], selected).map((option) => (
+          <option key={option.id} value={option.id}>
+            {option.id === fallback || option.id === `openai/${fallback}`
+              ? `${option.label} (default)`
+              : option.label}
+          </option>
+        ))}
+      </select>
+      <p className="hint">{hint}</p>
+    </label>
+  );
+}
+
+function ModelsPanel({
+  settings,
+  setSettings,
+}: {
+  settings: Settings;
+  setSettings: Dispatch<SetStateAction<Settings>>;
+}) {
+  const auth = catalogAuth(settings);
+  const { catalog, loading, error, now, refresh } = useModelCatalog(auth);
+  const source = catalog?.source ?? auth?.mode ?? null;
+  const comprehension = source
+    ? catalogModelId(source, settings.comprehensionModel)
+    : settings.comprehensionModel;
+  const tts = source ? catalogModelId(source, settings.ttsModel) : settings.ttsModel;
+  const fallbackComprehension = source
+    ? catalogModelId(source, DEFAULT_COMPREHENSION_MODEL)
+    : DEFAULT_COMPREHENSION_MODEL;
+  const fallbackTts = source
+    ? catalogModelId(source, DEFAULT_TTS_MODEL)
+    : DEFAULT_TTS_MODEL;
+
+  let status: string;
+  if (!auth) {
+    status = 'Connect OpenRouter or add an OpenAI key to list models.';
+  } else if (loading && !catalog) {
+    status = 'Loading models…';
+  } else if (catalog) {
+    status = `${catalog.comprehension.length + catalog.tts.length} models from ${
+      catalog.source === 'openrouter' ? 'OpenRouter' : 'OpenAI'
+    } · updated ${formatAge(catalog.fetchedAt, now)}${loading ? ' · refreshing…' : ''}`;
+  } else {
+    status = 'Models not loaded yet.';
+  }
+
+  return (
+    <section className="models-block" aria-labelledby="models-title">
+      <div className="models-block__heading">
+        <h2 id="models-title" className="auth-block__title">
+          Models
+        </h2>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={!auth || loading}
+          onClick={() => void refresh()}
+        >
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </button>
+      </div>
+      <p className="hint">{status}</p>
+      {error ? <p className="hint warn">{error}</p> : null}
+
+      <ModelSelect
+        label="Comprehension model"
+        hint="Reads the page and writes the report. Needs structured JSON output."
+        value={comprehension}
+        fallback={fallbackComprehension}
+        options={catalog?.comprehension ?? null}
+        onChange={(comprehensionModel) =>
+          setSettings((s) => ({ ...s, comprehensionModel }))
+        }
+      />
+      <ModelSelect
+        label="Narration model"
+        hint="Streams the spoken audio. Voices below are OpenAI audio voices."
+        value={tts}
+        fallback={fallbackTts}
+        options={catalog?.tts ?? null}
+        onChange={(ttsModel) => setSettings((s) => ({ ...s, ttsModel }))}
+      />
+      <button
+        type="button"
+        className="btn-link"
+        onClick={() =>
+          setSettings((s) => ({
+            ...s,
+            comprehensionModel: DEFAULT_COMPREHENSION_MODEL,
+            ttsModel: DEFAULT_TTS_MODEL,
+          }))
+        }
+      >
+        Reset to defaults
+      </button>
     </section>
   );
 }
@@ -325,6 +575,15 @@ export default function App() {
           </p>
         </label>
 
+        {settings.providerMode === 'byok' ? (
+          <ModelsPanel settings={settings} setSettings={setSettings} />
+        ) : (
+          <p className="hint">
+            Managed listening uses {DEFAULT_COMPREHENSION_MODEL} and{' '}
+            {DEFAULT_TTS_MODEL}.
+          </p>
+        )}
+
         <label>
           Voice
           <select
@@ -343,7 +602,7 @@ export default function App() {
             ))}
           </select>
           <p className="hint">
-            Voices for gpt-audio-mini. Sage is a solid news-anchor default.
+            OpenAI audio voices. Sage is a solid news-anchor default.
           </p>
         </label>
 
@@ -366,7 +625,7 @@ export default function App() {
           </select>
           <p className="hint">
             Auto matches the article&apos;s language. Choose a language to
-            translate the report and narration. gpt-audio-mini supports the
+            translate the report and narration. OpenAI audio models support the
             languages listed here; voices are English-optimized.
           </p>
         </label>

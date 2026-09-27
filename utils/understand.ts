@@ -4,9 +4,6 @@ import { createStructuredResponse } from './openai';
 import type { ProviderUsage } from './usage';
 import type { ExtractedArticle, NewsReportScript, OutputLanguage, ReportLength } from './types';
 
-/** GPT-5.6 Luna — cost-optimized model for comprehension / rewrite */
-export const COMPREHENSION_MODEL = 'gpt-5.6-luna';
-
 export class UnderstandError extends Error {
   readonly usage: ProviderUsage;
 
@@ -97,6 +94,7 @@ Produce a news-report script JSON. The "lede" is the cold open. "segments" conti
 
 export async function understandArticle(options: {
   auth: LlmAuth;
+  model: string;
   article: ExtractedArticle;
   reportLength: ReportLength;
   outputLanguage: OutputLanguage;
@@ -104,7 +102,7 @@ export async function understandArticle(options: {
 }): Promise<{ script: NewsReportScript; usage: ProviderUsage }> {
   const { text: content, usage } = await createStructuredResponse({
     auth: options.auth,
-    model: COMPREHENSION_MODEL,
+    model: options.model,
     system: SYSTEM_PROMPT,
     user: buildUserPrompt(
       options.article,

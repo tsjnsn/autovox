@@ -40,7 +40,7 @@ Firefox variants: `pnpm dev:firefox`, `pnpm build:firefox`, `pnpm zip:firefox`.
 
 - [WXT](https://wxt.dev/) + React + TypeScript
 - Mozilla Readability for article extraction
-- OpenAI `gpt-5.6-luna` (understanding) + `gpt-audio-mini` (voice), via OpenRouter or direct OpenAI
+- OpenAI `gpt-6-luna` (understanding) + `gpt-audio-mini` (voice) by default, via OpenRouter or direct OpenAI; BYOK users can pick other models from the live list in Options
 - Convex control plane + Clerk authentication + Stripe-hosted credit checkout (managed builds only)
 
 Visual language: **Wire Meter** — see [DESIGN.md](../DESIGN.md).

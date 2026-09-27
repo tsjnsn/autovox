@@ -72,7 +72,7 @@ Development unpacked builds can have a different extension ID. Add that origin t
 2. Create a management key. Management keys cannot run inference.
 3. Put the management key only in Convex.
 4. Configure workspace guardrails:
-   - allow only `openai/gpt-5.6-luna` and `openai/gpt-audio-mini`
+   - allow only `openai/gpt-6-luna` and `openai/gpt-audio-mini` (managed listening always uses these defaults)
    - require zero data retention
    - deny provider data collection
    - disable prompt/completion logging and training

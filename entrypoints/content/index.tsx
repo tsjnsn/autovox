@@ -2,6 +2,7 @@ import './style.css';
 import ReactDOM from 'react-dom/client';
 import { OverlayApp } from '../../components/OverlayApp';
 import { extractArticleFromDocument } from '../../utils/extract';
+import { keepOnTop } from '../../utils/topLayer';
 import type { ExtensionMessage } from '../../utils/types';
 
 export default defineContentScript({
@@ -29,7 +30,7 @@ export default defineContentScript({
         anchor: 'body',
         append: 'last',
         isolateEvents: true,
-        onMount: (container) => {
+        onMount: (container, _shadow, shadowHost) => {
           const host = document.createElement('div');
           host.className = 'autovox-host';
           host.setAttribute('data-autovox', 'host');
@@ -40,10 +41,11 @@ export default defineContentScript({
 
           const root = ReactDOM.createRoot(app);
           root.render(<OverlayApp onClose={removeUi} />);
-          return root;
+          return { root, releaseTop: keepOnTop(shadowHost) };
         },
-        onRemove: (root) => {
-          root?.unmount();
+        onRemove: (mounted) => {
+          mounted?.releaseTop();
+          mounted?.root.unmount();
         },
       });
 

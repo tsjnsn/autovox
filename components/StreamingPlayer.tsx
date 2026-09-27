@@ -14,6 +14,7 @@ import { PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
 interface StreamingPlayerProps {
   script: NewsReportScript;
   auth: LlmAuth;
+  model: string;
   voice: VoiceId;
   outputLanguage: OutputLanguage;
   autoPlay?: boolean;
@@ -46,6 +47,7 @@ function bytesToSeconds(bytes: number): number {
 export function StreamingPlayer({
   script,
   auth,
+  model,
   voice,
   outputLanguage,
   autoPlay = true,
@@ -88,10 +90,12 @@ export function StreamingPlayer({
   const authKey = authCacheKey(auth);
   const scriptRef = useRef(script);
   const authRef = useRef(auth);
+  const modelRef = useRef(model);
   const voiceRef = useRef(voice);
   const outputLanguageRef = useRef(outputLanguage);
   scriptRef.current = script;
   authRef.current = auth;
+  modelRef.current = model;
   voiceRef.current = voice;
   outputLanguageRef.current = outputLanguage;
 
@@ -339,6 +343,7 @@ export function StreamingPlayer({
         const text = texts[i]!;
         for await (const chunk of streamSegmentPcm({
           auth: authRef.current,
+          model: modelRef.current,
           voice: voiceRef.current,
           outputLanguage: outputLanguageRef.current,
           text,
@@ -399,7 +404,7 @@ export function StreamingPlayer({
     updateBufferFromBytes,
   ]);
 
-  // New script / voice / key → fresh stream (invalidates cache)
+  // New script / model / voice / key → fresh stream (invalidates cache)
   useEffect(() => {
     if (autoPlay) {
       void startStream();
@@ -414,7 +419,7 @@ export function StreamingPlayer({
       runIdRef.current += 1;
       streamingRef.current = false;
     };
-  }, [scriptKey, authKey, voice, outputLanguage, autoPlay]);
+  }, [scriptKey, authKey, model, voice, outputLanguage, autoPlay]);
 
   const toggle = async () => {
     const player = playerRef.current;
