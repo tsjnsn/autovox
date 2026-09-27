@@ -1,16 +1,16 @@
 # Store pulse — Autovox flywheel
 
-Fetched **2026-09-22T06:45:20.851Z** from the public [Chrome Web Store listing](https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda).
+Fetched **2026-09-27T06:44:50.946Z** from the public [Chrome Web Store listing](https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda).
 
 | Signal | Now | Δ vs last pulse |
 | --- | --- | --- |
-| Users (public count) | unknown | — |
+| Users (public count) | 4 | — |
 | Rating | unrated | — |
 | Reviews | 0 | — |
-| Listed version | 0.2.0 | 0.2.0 → 0.2.0 |
-| Last store update | 2026-08-12T02:25:33.000Z | |
+| Listed version | 0.3.0 | 0.2.0 → 0.3.0 |
+| Last store update | 2026-09-27T04:54:57.000Z | |
 | Category | productivity/communication | |
-| Size | 184KiB | |
+| Size | 1.99MiB | |
 
 This snapshot is **acquisition only** (store listing + public reviews). The flywheel dataset is money — see [docs/flywheel.md](../docs/flywheel.md). Autovox still has no backend and does not send product telemetry.
 
