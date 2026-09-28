@@ -19,11 +19,17 @@ import {
   setManagedTabSession,
 } from '../utils/managed';
 import type { LlmAuth } from '../utils/auth';
+import type { SessionFormat } from '../utils/chalk/types';
 import type { BriefProgress, ExtensionMessage } from '../utils/types';
 
 const CONTEXT_MENU_VOX_PAGE = 'autovox-vox-page';
+const CONTEXT_MENU_CHALKBOARD = 'autovox-chalkboard-page';
 
-/** Abort in-flight briefs when the tab navigates away. */
+/**
+ * Abort in-flight briefs when the tab navigates away. A chalkboard keeps its
+ * controller registered until every scene has drawn, so navigation, Clear,
+ * or a new brief also stops scene drawing.
+ */
 const abortByTab = new Map<number, AbortController>();
 type ManagedAuthRequest = Extract<
   ExtensionMessage,
@@ -185,9 +191,10 @@ async function openOverlayOnTab(tabId: number): Promise<void> {
  */
 async function startBriefForTab(
   tabId: number,
-  options: { force?: boolean } = {},
+  options: { force?: boolean; format?: SessionFormat } = {},
 ): Promise<{ ok: boolean; error?: string; skipped?: boolean }> {
   const force = options.force ?? false;
+  const format = options.format ?? 'brief';
   const pageUrl = await tabPageUrl(tabId);
   const existing = await getTabBrief(tabId, pageUrl);
 
@@ -200,7 +207,8 @@ async function startBriefForTab(
   if (
     !force &&
     existing.result &&
-    sameSourceUrl(existing.result.source.url, pageUrl)
+    sameSourceUrl(existing.result.source.url, pageUrl) &&
+    (existing.result.format ?? 'brief') === format
   ) {
     return { ok: true, skipped: true };
   }
@@ -219,7 +227,7 @@ async function startBriefForTab(
   );
 
   try {
-    await runBriefPipeline(
+    const { drawing } = await runBriefPipeline(
       tabId,
       pageUrl,
       (progress) => {
@@ -227,9 +235,17 @@ async function startBriefForTab(
         notifyTab(tabId, { type: 'BRIEF_PROGRESS', progress });
       },
       controller.signal,
+      format,
     );
-    if (abortByTab.get(tabId) === controller) {
-      abortByTab.delete(tabId);
+    const release = () => {
+      if (abortByTab.get(tabId) === controller) {
+        abortByTab.delete(tabId);
+      }
+    };
+    if (drawing) {
+      void drawing.finally(release);
+    } else {
+      release();
     }
     await setTabProgress(
       tabId,
@@ -277,6 +293,11 @@ function registerContextMenus(): void {
       title: 'Vox this page',
       contexts: ['page'],
     });
+    browser.contextMenus.create({
+      id: CONTEXT_MENU_CHALKBOARD,
+      title: 'Chalkboard this page',
+      contexts: ['page'],
+    });
   });
 }
 
@@ -288,7 +309,13 @@ export default defineBackground(() => {
   registerContextMenus();
 
   browser.contextMenus.onClicked.addListener((info, tab) => {
-    if (info.menuItemId !== CONTEXT_MENU_VOX_PAGE) return;
+    const format: SessionFormat | null =
+      info.menuItemId === CONTEXT_MENU_VOX_PAGE
+        ? 'brief'
+        : info.menuItemId === CONTEXT_MENU_CHALKBOARD
+          ? 'chalkboard'
+          : null;
+    if (!format) return;
     const tabId = tab?.id;
     if (tabId == null) return;
     const pageUrl = tab?.url;
@@ -301,7 +328,7 @@ export default defineBackground(() => {
         await openOverlayOnTab(tabId);
         // Let OverlayApp mount and attach BRIEF_* listeners
         await new Promise((resolve) => setTimeout(resolve, 80));
-        await startBriefForTab(tabId, { force: false });
+        await startBriefForTab(tabId, { force: false, format });
       } catch (error) {
         console.error('Failed to vox page from context menu', error);
       }
@@ -529,7 +556,10 @@ export default defineBackground(() => {
         }
 
         sendResponse({ ok: true });
-        const outcome = await startBriefForTab(tabId, { force: true });
+        const outcome = await startBriefForTab(tabId, {
+          force: true,
+          format: msg.format,
+        });
         if (!outcome.ok && outcome.error && outcome.error !== 'Briefing aborted') {
           // Error already notified to the tab via BRIEF_ERROR
         }

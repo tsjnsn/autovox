@@ -39,6 +39,11 @@
   pointer-events: auto;
 }
 
+/* A chalkboard session widens the chassis to fit the board. */
+.autovox-host:has(.autovox-card--board) {
+  width: 640px;
+}
+
 .autovox-host ::selection {
   background: var(--av-accent);
   color: var(--av-accent-ink);

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Chalkboard } from './Chalkboard';
 import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
 import { PlayIcon } from './TransportIcons';
@@ -13,6 +14,12 @@ import {
 } from '../utils/money';
 import { getSettings } from '../utils/storage';
 import { activeModels } from '../utils/models';
+import { buildTeacherInstructions, lessonTtsChunks } from '../utils/tts';
+import type {
+  ChalkSceneDrawing,
+  ChalkTimeline,
+  SessionFormat,
+} from '../utils/chalk/types';
 import type { ProviderUsage } from '../utils/usage';
 import type {
   BriefPhase,
@@ -31,6 +38,28 @@ interface BriefStateResponse {
 
 interface OverlayAppProps {
   onClose: () => void;
+}
+
+const EMPTY_TIMELINE: ChalkTimeline = { starts: [], ends: [] };
+
+type SceneBacklog = {
+  sessionId: string;
+  scenes: Map<number, ChalkSceneDrawing>;
+};
+
+/** Fold scenes that arrived before (or alongside) the result into it. */
+function withScenes(
+  result: BriefResult,
+  backlog: SceneBacklog | null,
+): BriefResult {
+  const lesson = result.lesson;
+  if (!lesson || !backlog || backlog.sessionId !== result.moneySessionId) {
+    return result;
+  }
+  const drawings = lesson.scenes.map(
+    (_, index) => backlog.scenes.get(index) ?? result.drawings?.[index] ?? null,
+  );
+  return { ...result, drawings };
 }
 
 /** Short meter labels only — no idle instructional copy, no long headlines. */
@@ -75,6 +104,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const [narrating, setNarrating] = useState(false);
   const [managedPlayerAuth, setManagedPlayerAuth] =
     useState<LlmAuth | null>(null);
+  const [timeline, setTimeline] = useState<ChalkTimeline>(EMPTY_TIMELINE);
+  const clockRef = useRef<(() => number) | null>(null);
+  const sceneBacklogRef = useRef<SceneBacklog | null>(null);
+  const getBoardTime = useCallback(() => clockRef.current?.() ?? 0, []);
 
   const hasScriptRef = useRef(false);
   hasScriptRef.current = Boolean(result);
@@ -242,6 +275,13 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         })()
       : null;
   const hasPlayer = Boolean(result && playerAuth);
+  const lesson = result?.format === 'chalkboard' ? result.lesson : undefined;
+  const lessonChunks = useMemo(
+    () => (lesson ? lessonTtsChunks(lesson) : undefined),
+    [lesson],
+  );
+  const teacherInstructions =
+    lesson && settings ? buildTeacherInstructions(settings.outputLanguage) : undefined;
 
   useEffect(() => {
     const pageUrl = location.href;
@@ -250,6 +290,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       moneySessionRef.current = null;
       managedRuntimeSessionRef.current = null;
       setManagedPlayerAuth(null);
+      setTimeline(EMPTY_TIMELINE);
       setResult(null);
       setPhase('idle');
       setError('');
@@ -272,7 +313,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         moneySessionRef.current = matched.moneySessionId ?? null;
         setPhase(state.progress.phase);
         setExtracting(Boolean(state.running));
-        setResult(matched);
+        setResult(withScenes(matched, sceneBacklogRef.current));
         if (state.progress.phase === 'generating_audio') {
           setNarrating(true);
           setStreamKey((k) => k + 1);
@@ -319,12 +360,23 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         moneySessionRef.current = message.result.moneySessionId ?? null;
         managedRuntimeSessionRef.current = null;
         setManagedPlayerAuth(null);
-        setResult(message.result);
+        setTimeline(EMPTY_TIMELINE);
+        setResult(withScenes(message.result, sceneBacklogRef.current));
         setPhase('generating_audio');
         setExtracting(false);
         setNarrating(true);
         setError('');
         setStreamKey((k) => k + 1);
+      }
+      if (message.type === 'CHALK_SCENE_READY') {
+        if (!samePageUrl(message.pageUrl, location.href)) return;
+        let backlog = sceneBacklogRef.current;
+        if (backlog?.sessionId !== message.sessionId) {
+          backlog = { sessionId: message.sessionId, scenes: new Map() };
+          sceneBacklogRef.current = backlog;
+        }
+        backlog.scenes.set(message.scene, message.drawing);
+        setResult((prev) => (prev ? withScenes(prev, backlog) : prev));
       }
       if (message.type === 'BRIEF_ERROR') {
         setPhase('error');
@@ -370,7 +422,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     void browser.runtime.sendMessage({ type: 'OPEN_OPTIONS' });
   };
 
-  const startBrief = async () => {
+  const startBrief = async (format: SessionFormat = 'brief') => {
     const latest = await getSettings();
     setSettings(latest);
     if (!hasLlmAuth(latest)) {
@@ -383,6 +435,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     moneySessionRef.current = null;
     managedRuntimeSessionRef.current = null;
     setManagedPlayerAuth(null);
+    setTimeline(EMPTY_TIMELINE);
     setResult(null);
     setNarrating(false);
     setExtracting(true);
@@ -390,6 +443,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
     const response = (await browser.runtime.sendMessage({
       type: 'START_BRIEF',
+      format,
     })) as { ok: boolean; error?: string };
 
     if (!response?.ok) {
@@ -404,6 +458,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     moneySessionRef.current = null;
     managedRuntimeSessionRef.current = null;
     setManagedPlayerAuth(null);
+    setTimeline(EMPTY_TIMELINE);
     setResult(null);
     setPhase('idle');
     setError('');
@@ -451,7 +506,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     hasAuth === false ? 'No auth' : meterLabel(phase, error, extracting);
 
   return (
-    <div className="autovox-card">
+    <div className={`autovox-card${lesson ? ' autovox-card--board' : ''}`}>
       <div className="autovox-card__face">
         <header className="autovox-card__header">
           <h1 className="autovox-card__title">Autovox</h1>
@@ -465,11 +520,25 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           </button>
         </header>
 
+        {lesson ? (
+          <Chalkboard
+            lesson={lesson}
+            drawings={result!.drawings ?? lesson.scenes.map(() => null)}
+            timeline={timeline}
+            getTime={getBoardTime}
+          />
+        ) : null}
+
         {hasPlayer ? (
           <>
             <StreamingPlayer
               key={`${streamKey}:${settings!.providerMode}`}
               script={result!.script}
+              chunks={lessonChunks}
+              ttsInstructions={teacherInstructions}
+              prefetch={lesson ? 2 : 0}
+              onChunkTimeline={lesson ? setTimeline : undefined}
+              clockRef={lesson ? clockRef : undefined}
               auth={playerAuth!}
               model={activeModels(settings!).tts}
               voice={settings!.voice}
@@ -495,8 +564,12 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
                 type="button"
                 className="player__icon-btn player__icon-btn--armed"
                 disabled={busy || hasAuth === false}
-                onClick={() => void startBrief()}
-                aria-label="Brief this page"
+                onClick={() => void startBrief(result?.format ?? 'brief')}
+                aria-label={
+                  result?.format === 'chalkboard'
+                    ? 'Chalkboard this page'
+                    : 'Brief this page'
+                }
               >
                 <PlayIcon />
               </button>
@@ -538,6 +611,21 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           >
             Options
           </button>
+          {!lesson ? (
+            <>
+              <span className="autovox-actions__sep" aria-hidden="true">
+                ·
+              </span>
+              <button
+                type="button"
+                className="autovox-link"
+                disabled={busy || hasAuth === false}
+                onClick={() => void startBrief('chalkboard')}
+              >
+                Chalkboard
+              </button>
+            </>
+          ) : null}
           {result ? (
             <>
               <span className="autovox-actions__sep" aria-hidden="true">

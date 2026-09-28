@@ -9,11 +9,13 @@ Autovox offers two modes:
 
 ## What Autovox reads
 
-When you start a brief, Autovox extracts the main article text from the active tab (via Mozilla Readability) so it can rewrite and narrate that page.
+When you start a brief or a chalkboard lesson, Autovox extracts the main article text from the active tab (via Mozilla Readability) so it can rewrite and narrate that page.
 
 ## What is sent to third parties
 
 Depending on the mode selected in Options:
+
+A chalkboard lesson additionally sends the generated lesson script (not the article text) back to the same provider, once per board, to draw its scenes.
 
 - **Managed listening:** article text and narration requests are sent directly to [OpenRouter](https://openrouter.ai/) using a short-lived, dollar-capped key funded by Autovox. Requests require zero-data-retention routing and deny provider data collection.
 - **OpenRouter BYOK:** article text and narration requests are sent to OpenRouter (and onward to the models you use there).
@@ -45,14 +47,14 @@ Reconciled per-session product records are deleted after 90 days. Aggregate dail
 
 Settings (OpenRouter connection, optional OpenAI API key, voice, output language, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state may be kept in session storage while the extension is active.
 
-Autovox also keeps a **local spend ledger** on this profile: cost, model, outcome (completed / fault / aborted), report length, voice, and output language. That record does **not** include the page URL, title, or article text. BYOK ledger records are not sent to Autovox.
+Autovox also keeps a **local spend ledger** on this profile: cost, model, stage (understand, narrate, or chalkboard drawing), outcome (completed / fault / aborted), report length, voice, and output language. That record does **not** include the page URL, title, or article text. BYOK ledger records are not sent to Autovox.
 
 Short-lived managed provider keys are held in `chrome.storage.session`, not local or sync storage, and are disabled after the session or automatically expire.
 
 ## Permissions
 
 - **activeTab / scripting:** temporary access to the tab you invoke Autovox on (toolbar icon or “Vox this page” context menu) so Autovox can inject the overlay and extract article text. Autovox does not request persistent access to all websites.
-- **contextMenus:** adds a “Vox this page” item to the page right-click menu that opens Autovox and starts the spoken brief.
+- **contextMenus:** adds “Vox this page” and “Chalkboard this page” items to the page right-click menu that open Autovox and start the spoken brief or chalkboard lesson.
 - **storage:** save settings, the BYOK spend ledger, and short-lived managed session state on this profile.
 - **identity:** OpenRouter OAuth connect flow.
 - **Host access to `openrouter.ai` and `api.openai.com`:** call those APIs from the extension.

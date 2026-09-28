@@ -1,3 +1,4 @@
+import type { ChalkSceneDrawing } from './chalk/types';
 import { finishMoneySession } from './money';
 import type { BriefProgress, BriefResult } from './types';
 
@@ -62,6 +63,24 @@ async function readPersisted(): Promise<PersistedMap> {
 
 async function writePersisted(map: PersistedMap): Promise<void> {
   await browser.storage.session.set({ [SESSION_KEY]: map });
+}
+
+let persistQueue: Promise<unknown> = Promise.resolve();
+
+/**
+ * Serialize read-modify-write of the persisted map. Chalkboard scenes finish
+ * in parallel, and an unserialized save could drop a sibling scene or revive
+ * a cleared brief.
+ */
+function mutatePersisted<T>(fn: (map: PersistedMap) => T): Promise<T> {
+  const run = persistQueue.then(async () => {
+    const map = await readPersisted();
+    const result = fn(map);
+    await writePersisted(map);
+    return result;
+  });
+  persistQueue = run.catch(() => undefined);
+  return run;
 }
 
 export async function getTabBrief(
@@ -155,9 +174,9 @@ export async function saveTabBriefResult(
   result: BriefResult,
 ): Promise<void> {
   const normalized = normalizePageUrl(pageUrl);
-  const map = await readPersisted();
-  map[tabKey(tabId)] = { pageUrl: normalized, result };
-  await writePersisted(map);
+  await mutatePersisted((map) => {
+    map[tabKey(tabId)] = { pageUrl: normalized, result };
+  });
 
   const live = liveByTab.get(tabId);
   liveByTab.set(tabId, {
@@ -171,16 +190,46 @@ export async function saveTabBriefResult(
   });
 }
 
+/**
+ * Store one finished chalkboard scene on the tab's brief so a reopened
+ * overlay redraws it without paying for it again. Returns false when the
+ * brief it belongs to is gone or was replaced.
+ */
+export async function saveTabChalkDrawing(
+  tabId: number,
+  pageUrl: string,
+  sessionId: string,
+  scene: number,
+  drawing: ChalkSceneDrawing,
+): Promise<boolean> {
+  return await mutatePersisted((map) => {
+    const entry = map[tabKey(tabId)];
+    if (
+      !entry ||
+      !samePageUrl(entry.pageUrl, pageUrl) ||
+      entry.result.moneySessionId !== sessionId ||
+      !entry.result.lesson
+    ) {
+      return false;
+    }
+    const drawings = entry.result.lesson.scenes.map(
+      (_, index) => entry.result.drawings?.[index] ?? null,
+    );
+    drawings[scene] = drawing;
+    entry.result = { ...entry.result, drawings };
+    return true;
+  });
+}
+
 export async function clearTabBrief(tabId: number): Promise<void> {
   const live = liveByTab.get(tabId);
-  const map = await readPersisted();
-  const sessionId =
-    live?.moneySessionId ?? map[tabKey(tabId)]?.result.moneySessionId;
   liveByTab.delete(tabId);
-  if (map[tabKey(tabId)]) {
+  const removed = await mutatePersisted((map) => {
+    const entry = map[tabKey(tabId)];
     delete map[tabKey(tabId)];
-    await writePersisted(map);
-  }
+    return entry;
+  });
+  const sessionId = live?.moneySessionId ?? removed?.result.moneySessionId;
   if (sessionId) {
     await finishMoneySession(sessionId, 'aborted');
   }

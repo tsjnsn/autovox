@@ -5,6 +5,11 @@ import {
 } from './languages';
 
 import { DEFAULT_COMPREHENSION_MODEL, DEFAULT_TTS_MODEL } from './models';
+import type {
+  ChalkLesson,
+  ChalkSceneDrawing,
+  SessionFormat,
+} from './chalk/types';
 
 export type { OutputLanguage };
 export {
@@ -87,6 +92,12 @@ export interface BriefResult {
     siteName: string | null;
   };
   script: NewsReportScript;
+  /** Absent on briefs saved before chalkboard sessions existed. */
+  format?: SessionFormat;
+  /** Chalkboard only; `script` is derived from it for the shared player. */
+  lesson?: ChalkLesson;
+  /** Chalkboard only, by scene; null until that scene's drawing arrives. */
+  drawings?: (ChalkSceneDrawing | null)[];
   /** Immutable pricing dimension for managed replay. */
   reportLength?: ReportLength;
   /** Local spend session — no page content is attached to the ledger. */
@@ -129,7 +140,7 @@ export type ExtensionMessage =
       sessionId: string;
       event: ManagedLifecycleEvent;
     }
-  | { type: 'START_BRIEF'; tabId?: number }
+  | { type: 'START_BRIEF'; tabId?: number; format?: SessionFormat }
   /** Brief state for the sender's tab + page URL only. */
   | { type: 'GET_BRIEF_STATE' }
   /** Clears brief state for the sender's tab only. */
@@ -139,6 +150,15 @@ export type ExtensionMessage =
   /** Targeted at the owning tab via tabs.sendMessage (not broadcast). */
   | { type: 'BRIEF_PROGRESS'; progress: BriefProgress }
   | { type: 'BRIEF_SCRIPT_READY'; result: BriefResult }
+  /** One chalkboard scene finished drawing (targeted at the owning tab). */
+  | {
+      type: 'CHALK_SCENE_READY';
+      pageUrl: string;
+      /** The owning brief's `moneySessionId`, so stale scenes are ignored. */
+      sessionId: string;
+      scene: number;
+      drawing: ChalkSceneDrawing;
+    }
   | { type: 'BRIEF_ERROR'; error: string };
 
 export const VOICES: { id: VoiceId; label: string }[] = [

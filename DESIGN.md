@@ -101,10 +101,35 @@ source…                (after script ready)
 Show script
 Synthetic voice · not human
 
-Options · Clear
+Options · Chalkboard     (idle / brief)
+Options · Clear          (after script ready)
 ```
 
 No logo subtitle. No voice select. No separate Brief button. No Stop.
+
+### Chalkboard session
+
+```
+AUTOVOX                                         Close
+┌──────────────────────────────────────────────────┐
+│  chalk heading                                   │
+│    o/        ──────▶   [ box ]                   │  board 5:3, slate green
+│   /|    label                                    │
+│   / \                                            │
+└──────────────────────────────────────────────────┘
+[▶]  =============meter=============          0:42
+     vol ————
+source…
+Show script
+Synthetic voice · not human
+
+Options · Clear
+```
+
+- The board is a display on the same instrument, not a second mode: one transport row still drives it, and the chassis only widens.
+- The board is a pure function of the playhead. Scrub, pause, and replay put it exactly where the voice is; it never runs ahead through a buffering gap.
+- The board is never blank or stale: the heading is written first, beat notes stand in until a scene's art arrives, then the art catches up in about a second.
+- **Chalkboard** is a quiet meta link (like Options), never a second primary button. Play still means go.
 
 ## Motion
 
