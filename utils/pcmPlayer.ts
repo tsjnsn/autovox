@@ -15,6 +15,13 @@ export function pcmDurationSeconds(pcm: Uint8Array): number {
   return samples / PCM_SAMPLE_RATE;
 }
 
+/** Where one scheduled block sits on both the AudioContext and media clocks. */
+type ScheduledBlock = {
+  ctxStart: number;
+  mediaStart: number;
+  duration: number;
+};
+
 /**
  * Schedules streamed 24 kHz 16-bit LE mono PCM onto a Web Audio graph.
  * Playback begins once the first ~200 ms of samples arrive.
@@ -40,6 +47,10 @@ export class PcmStreamPlayer {
   private clockRunning = false;
   private startMediaOffset = 0;
   private _duration = 0;
+  /** Media time of the next sample to schedule. */
+  private mediaCursor = 0;
+  /** Scheduled blocks in play order; maps context time to media time. */
+  private blocks: ScheduledBlock[] = [];
 
   onStart?: () => void;
   onEnded?: () => void;
@@ -69,12 +80,34 @@ export class PcmStreamPlayer {
     if (!this.ctx || !this.clockRunning || this.ctx.state !== 'running') {
       return this.anchorMediaTime;
     }
-    const t =
-      this.anchorMediaTime + (this.ctx.currentTime - this.anchorCtxTime);
+    const t = this.blocks.length
+      ? this.mediaTimeAt(this.ctx.currentTime)
+      : this.anchorMediaTime + (this.ctx.currentTime - this.anchorCtxTime);
     if (this._duration > 0) {
       return Math.min(this._duration, Math.max(0, t));
     }
     return Math.max(0, t);
+  }
+
+  /**
+   * Media time of what is audible at `ctxTime`. Holds still through a
+   * buffering gap instead of running ahead of the audio, so anything synced
+   * to this clock (scrubber, chalkboard) stays on the words being spoken.
+   */
+  private mediaTimeAt(ctxTime: number): number {
+    const blocks = this.blocks;
+    if (ctxTime < blocks[0]!.ctxStart) return blocks[0]!.mediaStart;
+    let lo = 0;
+    let hi = blocks.length - 1;
+    while (lo < hi) {
+      const mid = (lo + hi + 1) >> 1;
+      if (blocks[mid]!.ctxStart <= ctxTime) lo = mid;
+      else hi = mid - 1;
+    }
+    const block = blocks[lo]!;
+    return (
+      block.mediaStart + Math.min(block.duration, ctxTime - block.ctxStart)
+    );
   }
 
   setDuration(seconds: number): void {
@@ -164,6 +197,8 @@ export class PcmStreamPlayer {
     this.clockRunning = false;
     this.startMediaOffset = 0;
     this._duration = 0;
+    this.mediaCursor = 0;
+    this.blocks = [];
   }
 
   /** Play PCM from an optional media offset (seconds). */
@@ -187,6 +222,7 @@ export class PcmStreamPlayer {
     const startSample = Math.floor(clampedOffset * PCM_SAMPLE_RATE);
     const byteOffset = startSample * PCM_BYTES_PER_SAMPLE;
     this.startMediaOffset = startSample / PCM_SAMPLE_RATE;
+    this.mediaCursor = this.startMediaOffset;
 
     const data = pcm.subarray(byteOffset, usable);
     for (let offset = 0; offset < data.byteLength; offset += SCHEDULE_CHUNK_BYTES) {
@@ -300,6 +336,12 @@ export class PcmStreamPlayer {
     const startAt = Math.max(this.nextTime, ctx.currentTime + 0.05);
     source.start(startAt);
     this.nextTime = startAt + buffer.duration;
+    this.blocks.push({
+      ctxStart: startAt,
+      mediaStart: this.mediaCursor,
+      duration: buffer.duration,
+    });
+    this.mediaCursor += buffer.duration;
     this.sources.add(source);
     this.activeSources += 1;
 

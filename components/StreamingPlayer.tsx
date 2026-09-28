@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type MutableRefObject,
+} from 'react';
 import { authCacheKey, type LlmAuth } from '../utils/auth';
 import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from '../utils/openai';
 import {
@@ -6,7 +12,9 @@ import {
   pcmDurationSeconds,
   PcmStreamPlayer,
 } from '../utils/pcmPlayer';
+import { prefetchInOrder } from '../utils/prefetch';
 import { buildTtsChunks, streamSegmentPcm } from '../utils/tts';
+import type { ChalkTimeline } from '../utils/chalk/types';
 import type { ProviderUsage } from '../utils/usage';
 import type { NewsReportScript, OutputLanguage, VoiceId } from '../utils/types';
 import { PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
@@ -24,6 +32,16 @@ interface StreamingPlayerProps {
   onAbort?: (playbackSeconds: number) => void;
   /** Fired once per TTS API segment that actually spent. Cache replay does not fire. */
   onUsage?: (usage: ProviderUsage) => void | Promise<void>;
+  /** Narration requests in order; defaults to the script split for TTS. */
+  chunks?: string[];
+  /** Voice direction; defaults to the news anchor. */
+  ttsInstructions?: string;
+  /** Later chunks to download while the current one streams. */
+  prefetch?: number;
+  /** Media-time span of each chunk, re-published as downloads progress. */
+  onChunkTimeline?: (timeline: ChalkTimeline) => void;
+  /** Filled with a reader for the playhead (seconds), for per-frame sync. */
+  clockRef?: MutableRefObject<(() => number) | null>;
 }
 
 type TransportPhase = 'loading' | 'playing' | 'paused' | 'ready';
@@ -56,6 +74,11 @@ export function StreamingPlayer({
   onError,
   onAbort,
   onUsage,
+  chunks,
+  ttsInstructions,
+  prefetch = 0,
+  onChunkTimeline,
+  clockRef,
 }: StreamingPlayerProps) {
   const playerRef = useRef<PcmStreamPlayer | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -80,19 +103,27 @@ export function StreamingPlayer({
   const onErrorRef = useRef(onError);
   const onAbortRef = useRef(onAbort);
   const onUsageRef = useRef(onUsage);
+  const onChunkTimelineRef = useRef(onChunkTimeline);
+  onChunkTimelineRef.current = onChunkTimeline;
   onPlayingRef.current = onPlaying;
   onDoneRef.current = onDone;
   onErrorRef.current = onError;
   onAbortRef.current = onAbort;
   onUsageRef.current = onUsage;
 
-  const scriptKey = `${script.headline}\n${script.lede}\n${script.segments.join('\n')}`;
+  const scriptKey = `${script.headline}\n${script.lede}\n${script.segments.join('\n')}\n${chunks?.join('\n') ?? ''}`;
   const authKey = authCacheKey(auth);
   const scriptRef = useRef(script);
   const authRef = useRef(auth);
   const modelRef = useRef(model);
   const voiceRef = useRef(voice);
   const outputLanguageRef = useRef(outputLanguage);
+  const chunksRef = useRef(chunks);
+  const ttsInstructionsRef = useRef(ttsInstructions);
+  const prefetchRef = useRef(prefetch);
+  chunksRef.current = chunks;
+  ttsInstructionsRef.current = ttsInstructions;
+  prefetchRef.current = prefetch;
   scriptRef.current = script;
   authRef.current = auth;
   modelRef.current = model;
@@ -110,8 +141,25 @@ export function StreamingPlayer({
   const [bufferedSeconds, setBufferedSeconds] = useState(0);
   const [position, setPosition] = useState(0);
 
+  const positionRef = useRef(0);
   durationRef.current = duration;
   bufferedSecondsRef.current = bufferedSeconds;
+  positionRef.current = position;
+
+  useEffect(() => {
+    if (!clockRef) return;
+    const read = () => {
+      const player = playerRef.current;
+      if (player && phaseRef.current === 'playing' && !scrubbingRef.current) {
+        return player.getCurrentTime();
+      }
+      return positionRef.current;
+    };
+    clockRef.current = read;
+    return () => {
+      if (clockRef.current === read) clockRef.current = null;
+    };
+  }, [clockRef]);
 
   const setTransportPhase = useCallback((next: TransportPhase) => {
     phaseRef.current = next;
@@ -328,47 +376,66 @@ export function StreamingPlayer({
     setNeedsGesture(false);
     setTransportPhase('loading');
 
-    const texts = buildTtsChunks(scriptRef.current);
+    const texts = chunksRef.current ?? buildTtsChunks(scriptRef.current);
+    const instructions = ttsInstructionsRef.current;
+    const starts: (number | null)[] = texts.map(() => null);
+    const ends: (number | null)[] = texts.map(() => null);
+    const publishTimeline = () =>
+      onChunkTimelineRef.current?.({ starts: [...starts], ends: [...ends] });
+    publishTimeline();
 
     try {
       await player.resume().catch(() => undefined);
 
-      for (let i = 0; i < texts.length; i++) {
+      let current = -1;
+      const events = prefetchInOrder(
+        texts.length,
+        (i) =>
+          streamSegmentPcm({
+            auth: authRef.current,
+            model: modelRef.current,
+            voice: voiceRef.current,
+            outputLanguage: outputLanguageRef.current,
+            instructions,
+            text: texts[i]!,
+            signal: abort.signal,
+            onUsage: (usage) => onUsageRef.current?.(usage),
+          }),
+        prefetchRef.current,
+      );
+      for await (const event of events) {
         if (abort.signal.aborted || runId !== runIdRef.current) return;
 
-        if (i > 0 && liveScheduleRef.current) {
-          player.prepareNextSegment();
+        if (event.index !== current) {
+          current = event.index;
+          if (current > 0 && liveScheduleRef.current) {
+            player.prepareNextSegment();
+          }
+          starts[current] = bytesToSeconds(cacheBytesRef.current);
+          publishTimeline();
         }
 
-        const text = texts[i]!;
-        for await (const chunk of streamSegmentPcm({
-          auth: authRef.current,
-          model: modelRef.current,
-          voice: voiceRef.current,
-          outputLanguage: outputLanguageRef.current,
-          text,
-          signal: abort.signal,
-          onUsage: (usage) => onUsageRef.current?.(usage),
-        })) {
-          if (abort.signal.aborted || runId !== runIdRef.current) return;
-
-          const copy = chunk.slice();
-          cacheChunksRef.current.push(copy);
-          cacheBytesRef.current += copy.byteLength;
-          cachePcmRef.current = null;
-          updateBufferFromBytes(cacheBytesRef.current);
-
-          if (liveScheduleRef.current) {
-            await player.feed(copy);
+        if ('done' in event) {
+          ends[current] = bytesToSeconds(cacheBytesRef.current);
+          publishTimeline();
+          if (current === texts.length - 1) {
+            markCacheComplete();
+            streamingRef.current = false;
+            if (liveScheduleRef.current) {
+              player.markStreamComplete();
+            }
           }
+          continue;
         }
 
-        if (i === texts.length - 1) {
-          markCacheComplete();
-          streamingRef.current = false;
-          if (liveScheduleRef.current) {
-            player.markStreamComplete();
-          }
+        const copy = event.chunk.slice();
+        cacheChunksRef.current.push(copy);
+        cacheBytesRef.current += copy.byteLength;
+        cachePcmRef.current = null;
+        updateBufferFromBytes(cacheBytesRef.current);
+
+        if (liveScheduleRef.current) {
+          await player.feed(copy);
         }
       }
 
@@ -419,7 +486,7 @@ export function StreamingPlayer({
       runIdRef.current += 1;
       streamingRef.current = false;
     };
-  }, [scriptKey, authKey, model, voice, outputLanguage, autoPlay]);
+  }, [scriptKey, authKey, model, voice, outputLanguage, ttsInstructions, autoPlay]);
 
   const toggle = async () => {
     const player = playerRef.current;

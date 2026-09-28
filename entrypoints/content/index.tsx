@@ -1,4 +1,5 @@
 import './style.css';
+import './chalkboard.css';
 import ReactDOM from 'react-dom/client';
 import { OverlayApp } from '../../components/OverlayApp';
 import { extractArticleFromDocument } from '../../utils/extract';

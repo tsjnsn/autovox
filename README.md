@@ -12,6 +12,7 @@
 
 - On-page overlay player (toolbar icon toggles it)
 - Right-click **Vox this page** opens Autovox and starts the brief
+- **Chalkboard** (overlay link or right-click **Chalkboard this page**) turns a tutorial into a narrated lesson while stick-figure chalk scenes are drawn in sync with the voice — scrub, pause, and replay keep the board on the words being spoken
 - Play starts the brief when idle — one transport control
 - Progressive scrubber (buffered + played), seek within downloaded audio
 - In-memory PCM cache for replay without re-calling TTS
@@ -23,7 +24,7 @@
 
 See [PRIVACY.md](./PRIVACY.md). Page text is sent directly to the selected AI provider. BYOK keys stay on the browser profile. Optional managed mode sends payment, credit, coarse configuration, cost, and lifecycle state to the Autovox control plane—but never URL, title, article text, script, or audio.
 
-Page access uses `activeTab` + `scripting` when you click the toolbar icon or **Vox this page** — not a persistent `<all_urls>` host permission. The `contextMenus` permission is only for that right-click entry.
+Page access uses `activeTab` + `scripting` when you click the toolbar icon or **Vox this page** — not a persistent `<all_urls>` host permission. The `contextMenus` permission is only for those right-click entries.
 
 ## Developers
 

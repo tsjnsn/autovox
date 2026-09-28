@@ -13,6 +13,7 @@ pnpm dev
 3. Load unpacked → `.output/chrome-mv3-dev`
 4. Open **Options** → use managed trial credits when configured, connect OpenRouter, or paste an OpenAI key
 5. Open an article → click the extension icon → press **play**, or right-click the page → **Vox this page**
+   - For a tutorial, click **Chalkboard** in the overlay (or right-click → **Chalkboard this page**) to get a narrated chalkboard lesson
 6. In **Options**, set voice, output language, and report length as needed
 
 ## Scripts

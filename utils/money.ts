@@ -13,7 +13,7 @@ export type MoneyEventKind = 'brief' | 'tts_replay';
 export type MoneyAuthMode = LlmAuth['mode'] | 'managed';
 
 export type MoneyLineItem = {
-  kind: 'understand' | 'tts';
+  kind: 'understand' | 'tts' | 'draw';
   model: string;
   costUsd: number | null;
   costKnown: boolean;
@@ -108,7 +108,9 @@ function isEventKind(value: unknown): value is MoneyEventKind {
 function isLineItem(value: unknown): value is MoneyLineItem {
   const rec = asRecord(value);
   if (!rec) return false;
-  if (rec.kind !== 'understand' && rec.kind !== 'tts') return false;
+  if (rec.kind !== 'understand' && rec.kind !== 'tts' && rec.kind !== 'draw') {
+    return false;
+  }
   if (typeof rec.model !== 'string' || rec.model.trim() === '') return false;
   if (typeof rec.costKnown !== 'boolean') return false;
   if (rec.costUsd !== null && typeof rec.costUsd !== 'number') return false;
