@@ -4,7 +4,6 @@ import {
   useRef,
   useState,
   type Dispatch,
-  type FormEvent,
   type SetStateAction,
 } from 'react';
 import {
@@ -28,13 +27,22 @@ import {
 import {
   catalogModelId,
   DEFAULT_COMPREHENSION_MODEL,
+  DEFAULT_DRAWING_MODEL,
   DEFAULT_TTS_MODEL,
   fetchModelCatalog,
   getCachedModelCatalog,
+  COST_UNIT,
+  estimateCost,
+  formatCost,
   MODEL_CATALOG_REFRESH_MS,
-  modelOptions,
+  MODEL_PICKS,
+  modelChoices,
   saveModelCatalog,
+  searchModels,
   type ModelCatalog,
+  type ModelOption,
+  type ModelRole,
+  type QualityLevel,
 } from '../../utils/models';
 import { getSettings, saveSettings } from '../../utils/storage';
 import {
@@ -122,9 +130,9 @@ function ManagedPanel({
     <section className="managed-block">
       <div className="managed-block__heading">
         <div>
-          <h2 className="auth-block__title">Managed listening</h2>
+          <h2 className="auth-block__title">Autovox credits</h2>
           <p className="hint">
-            No provider account needed. Start with 3 funded briefs.
+            No AI provider account needed. You start with 3 free credits.
           </p>
         </div>
         <Show when="signed-in">
@@ -147,8 +155,8 @@ function ManagedPanel({
             : 'Loading credits…'}
         </p>
         <p className="hint">
-          Short and standard use 1 credit; deep uses 2. A credit is
-          consumed only when the provider reports spend.
+          Short and standard briefs use 1 credit, deep briefs use 2. A brief
+          only uses credits once the AI provider has charged for it.
         </p>
         <div className="managed-block__actions">
           {!active ? (
@@ -157,10 +165,10 @@ function ManagedPanel({
               className="btn-primary"
               onClick={() => void onUseManaged()}
             >
-              Use managed
+              Use credits
             </button>
           ) : (
-            <span className="managed-block__active">Active</span>
+            <span className="managed-block__active">In use</span>
           )}
           <button
             type="button"
@@ -288,40 +296,216 @@ function useModelCatalog(auth: LlmAuth | null) {
   return { catalog, loading, error, now, refresh };
 }
 
-function ModelSelect({
+/** Rendering every OpenRouter model at once is slow; search narrows the rest. */
+const MAX_BROWSE_RESULTS = 60;
+
+function QualityBar({ level }: { level: QualityLevel }) {
+  return (
+    <span className="quality" role="img" aria-label={`Quality ${level} of 5`}>
+      {[1, 2, 3, 4, 5].map((step) => (
+        <i key={step} className={step <= level ? 'on' : undefined} />
+      ))}
+    </span>
+  );
+}
+
+function ModelRow({
+  name,
+  id,
+  tag,
+  note,
+  quality,
+  cost,
+  checked,
+  onSelect,
+}: {
+  name: string;
+  id?: string;
+  tag?: string;
+  note?: string;
+  quality?: QualityLevel;
+  /** Formatted estimate, e.g. "~$0.09 / lesson". */
+  cost?: string | null;
+  checked: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={checked}
+      className={`model-row${checked ? ' model-row--checked' : ''}`}
+      onClick={onSelect}
+    >
+      <span className="model-row__top">
+        <span className="model-row__name">{name}</span>
+        {tag ? <span className="model-row__tag">{tag}</span> : null}
+        {quality ? <QualityBar level={quality} /> : null}
+        {cost ? <span className="model-row__cost">{cost}</span> : null}
+      </span>
+      {note ? <span className="model-row__note">{note}</span> : null}
+      {id && id !== name ? <span className="model-row__id">{id}</span> : null}
+    </button>
+  );
+}
+
+function ModelPicker({
   label,
   hint,
+  role,
+  source,
   value,
   fallback,
+  inheritLabel,
   options,
   onChange,
 }: {
   label: string;
   hint: string;
+  role: ModelRole;
+  source: LlmAuth['mode'] | null;
+  /** Selected id in the catalog's format; empty means default (or inherit). */
   value: string;
+  /** The default model; marked in the list. */
   fallback: string;
-  options: ModelCatalog['comprehension'] | null;
+  /** When set, an empty value is offered as this choice instead of the fallback. */
+  inheritLabel?: string;
+  options: ModelOption[] | null;
   onChange: (model: string) => void;
 }) {
-  const selected = value || fallback;
+  const [query, setQuery] = useState('');
+  const [custom, setCustom] = useState('');
+  const selected = inheritLabel ? value : value || fallback;
+  const { recommended, others } = modelChoices(
+    source ?? 'openrouter',
+    options ?? [],
+    source ? MODEL_PICKS[role] : [],
+  );
+  const selectedOption = options?.find((option) => option.id === selected);
+  const selectedIsShortlisted = recommended.some((pick) => pick.id === selected);
+  const unlisted = Boolean(options && selected && !selectedOption);
+  const matches = searchModels(others, query);
+  const hasPrices = (options ?? []).some((option) => option.price);
+  const costOf = (option: ModelOption | undefined) => {
+    const usd = estimateCost(role, option?.price);
+    return usd === null ? null : `${formatCost(usd)} / ${COST_UNIT[role]}`;
+  };
+
+  const applyCustom = () => {
+    const id = custom.trim();
+    if (!id) return;
+    onChange(id);
+    setCustom('');
+  };
+
   return (
-    <label>
-      {label}
-      <select
-        value={selected}
-        disabled={!options}
-        onChange={(e) => onChange(e.target.value)}
-      >
-        {modelOptions(options ?? [], selected).map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.id === fallback || option.id === `openai/${fallback}`
-              ? `${option.label} (default)`
-              : option.label}
-          </option>
-        ))}
-      </select>
+    <fieldset className="model-picker">
+      <legend>{label}</legend>
       <p className="hint">{hint}</p>
-    </label>
+      <div className="model-picker__list" role="radiogroup" aria-label={label}>
+        {inheritLabel ? (
+          <ModelRow
+            name={inheritLabel}
+            checked={value === ''}
+            onSelect={() => onChange('')}
+          />
+        ) : null}
+        {recommended.map((pick) => (
+          <ModelRow
+            key={pick.id}
+            name={pick.label}
+            id={pick.id}
+            tag={
+              pick.id === fallback && pick.tag.toLowerCase() !== 'default'
+                ? `${pick.tag} · default`
+                : pick.tag
+            }
+            note={pick.note}
+            quality={pick.quality}
+            cost={costOf(pick)}
+            checked={pick.id === selected}
+            onSelect={() => onChange(pick.id)}
+          />
+        ))}
+        {selected && !selectedIsShortlisted ? (
+          <ModelRow
+            name={selectedOption?.label ?? selected}
+            id={selected}
+            tag="Your pick"
+            note={
+              unlisted
+                ? 'Not in your provider’s current list; it will be tried as typed and may fail.'
+                : undefined
+            }
+            cost={costOf(selectedOption)}
+            checked
+            onSelect={() => onChange(selected)}
+          />
+        ) : null}
+      </div>
+
+      <details className="model-picker__more">
+        <summary>
+          {options ? `Browse all ${options.length} models` : 'Browse all models'}
+          {' · '}or type an ID
+        </summary>
+        <input
+          type="search"
+          className="model-picker__search"
+          placeholder="Search by name or id"
+          aria-label={`Search ${label.toLowerCase()} options`}
+          value={query}
+          disabled={!options}
+          onChange={(e) => setQuery(e.target.value)}
+        />
+        <div className="model-picker__results" role="radiogroup" aria-label={`All ${label.toLowerCase()} options`}>
+          {matches.slice(0, MAX_BROWSE_RESULTS).map((option) => (
+            <ModelRow
+              key={option.id}
+              name={option.label}
+              id={option.id}
+              cost={costOf(option)}
+              checked={option.id === selected}
+              onSelect={() => onChange(option.id)}
+            />
+          ))}
+          {matches.length > MAX_BROWSE_RESULTS ? (
+            <p className="hint">
+              Showing {MAX_BROWSE_RESULTS} of {matches.length}. Search to narrow.
+            </p>
+          ) : null}
+          {options && matches.length === 0 ? (
+            <p className="hint">No models match. You can still type an ID below.</p>
+          ) : null}
+        </div>
+        <div className="model-picker__custom">
+          <input
+            type="text"
+            placeholder="Any model ID, e.g. vendor/model-name"
+            aria-label={`Custom ${label.toLowerCase()} id`}
+            value={custom}
+            onChange={(e) => setCustom(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                applyCustom();
+              }
+            }}
+          />
+          <button
+            type="button"
+            className="btn-secondary"
+            disabled={!custom.trim()}
+            onClick={applyCustom}
+          >
+            Use
+          </button>
+        </div>
+      </details>
+      {hasPrices ? (
+        <p className="hint">Costs are rough estimates for a typical {COST_UNIT[role]}.</p>
+      ) : null}
+    </fieldset>
   );
 }
 
@@ -338,25 +522,32 @@ function ModelsPanel({
   const comprehension = source
     ? catalogModelId(source, settings.comprehensionModel)
     : settings.comprehensionModel;
+  const drawing =
+    source && settings.drawingModel
+      ? catalogModelId(source, settings.drawingModel)
+      : settings.drawingModel;
   const tts = source ? catalogModelId(source, settings.ttsModel) : settings.ttsModel;
   const fallbackComprehension = source
     ? catalogModelId(source, DEFAULT_COMPREHENSION_MODEL)
     : DEFAULT_COMPREHENSION_MODEL;
+  const fallbackDrawing = source
+    ? catalogModelId(source, DEFAULT_DRAWING_MODEL)
+    : DEFAULT_DRAWING_MODEL;
   const fallbackTts = source
     ? catalogModelId(source, DEFAULT_TTS_MODEL)
     : DEFAULT_TTS_MODEL;
 
   let status: string;
   if (!auth) {
-    status = 'Connect OpenRouter or add an OpenAI key to list models.';
+    status = 'Connect OpenRouter or add an OpenAI key to choose models.';
   } else if (loading && !catalog) {
     status = 'Loading models…';
   } else if (catalog) {
     status = `${catalog.comprehension.length + catalog.tts.length} models from ${
       catalog.source === 'openrouter' ? 'OpenRouter' : 'OpenAI'
-    } · updated ${formatAge(catalog.fetchedAt, now)}${loading ? ' · refreshing…' : ''}`;
+    }, updated ${formatAge(catalog.fetchedAt, now)}.`;
   } else {
-    status = 'Models not loaded yet.';
+    status = 'Models haven’t loaded. Try Refresh.';
   }
 
   return (
@@ -377,9 +568,11 @@ function ModelsPanel({
       <p className="hint">{status}</p>
       {error ? <p className="hint warn">{error}</p> : null}
 
-      <ModelSelect
-        label="Comprehension model"
-        hint="Reads the page and writes the report. Needs structured JSON output."
+      <ModelPicker
+        label="Writing model"
+        hint="Reads the page and writes the report or lesson script. Needs structured output."
+        role="writing"
+        source={source}
         value={comprehension}
         fallback={fallbackComprehension}
         options={catalog?.comprehension ?? null}
@@ -387,9 +580,22 @@ function ModelsPanel({
           setSettings((s) => ({ ...s, comprehensionModel }))
         }
       />
-      <ModelSelect
+      <ModelPicker
+        label="Chalkboard drawing model"
+        hint="Lays out each chalkboard scene. Stronger models compose much better boards; drawing is most of a lesson’s cost."
+        role="drawing"
+        source={source}
+        value={drawing}
+        fallback={fallbackDrawing}
+        inheritLabel="Same as writing model"
+        options={catalog?.comprehension ?? null}
+        onChange={(drawingModel) => setSettings((s) => ({ ...s, drawingModel }))}
+      />
+      <ModelPicker
         label="Narration model"
-        hint="Streams the spoken audio. Voices below are OpenAI audio voices."
+        hint="Reads the report aloud."
+        role="narration"
+        source={source}
         value={tts}
         fallback={fallbackTts}
         options={catalog?.tts ?? null}
@@ -402,6 +608,7 @@ function ModelsPanel({
           setSettings((s) => ({
             ...s,
             comprehensionModel: DEFAULT_COMPREHENSION_MODEL,
+            drawingModel: DEFAULT_DRAWING_MODEL,
             ttsModel: DEFAULT_TTS_MODEL,
           }))
         }
@@ -412,18 +619,111 @@ function ModelsPanel({
   );
 }
 
+function SpendPanel({ spend }: { spend: MoneySummary | null }) {
+  return (
+    <section className="spend" aria-labelledby="spend-title">
+      <h2 id="spend-title" className="spend__title">
+        Spend
+      </h2>
+      <p className="spend__hero">
+        {!spend
+          ? '—'
+          : spend.briefCount === 0
+            ? 'No briefs yet.'
+            : `${formatUsd(spend.totalUsd)} across ${spend.briefCount} brief${spend.briefCount === 1 ? '' : 's'}`}
+      </p>
+      <dl className="spend__meter">
+        <div>
+          <dt>Last 7 days</dt>
+          <dd>{spend ? formatUsd(spend.last7dUsd) : '—'}</dd>
+        </div>
+        <div>
+          <dt>Average brief</dt>
+          <dd>
+            {spend?.averageCompletedUsd != null
+              ? formatUsd(spend.averageCompletedUsd)
+              : '—'}
+          </dd>
+        </div>
+        <div>
+          <dt>Spent on failed briefs</dt>
+          <dd>{spend ? formatUsd(spend.wastedUsd) : '—'}</dd>
+        </div>
+      </dl>
+      <p className="hint">
+        Tracked in this browser profile only; Autovox never receives it.
+        OpenRouter reports what each brief cost. OpenAI keys usually don’t, so
+        those briefs aren’t counted.
+        {spend && spend.costUnknownCount > 0
+          ? ` ${spend.costUnknownCount} ${spend.costUnknownCount === 1 ? 'charge has' : 'charges have'} no known cost.`
+          : ''}
+      </p>
+    </section>
+  );
+}
+
+const REPORT_LENGTHS: { id: ReportLength; label: string; minutes: string }[] = [
+  { id: 'short', label: 'Short', minutes: '1–1.5 min' },
+  { id: 'standard', label: 'Standard', minutes: '2–3.5 min' },
+  { id: 'deep', label: 'Deep', minutes: '3.5–5 min' },
+];
+
+/** Settings changes are written after typing pauses this long. */
+const AUTOSAVE_DELAY_MS = 400;
+
 export default function App() {
   const [settings, setSettings] = useState<Settings>(DEFAULT_SETTINGS);
+  const [loaded, setLoaded] = useState(false);
   const [status, setStatus] = useState('');
   const [connecting, setConnecting] = useState(false);
   const [connectError, setConnectError] = useState('');
   const [spend, setSpend] = useState<MoneySummary | null>(null);
+  const skipAutosaveRef = useRef(true);
+  const pendingSaveRef = useRef<Settings | null>(null);
+  const settingsRef = useRef(settings);
+  const flashTimerRef = useRef(0);
 
   const connected = Boolean(settings.openRouterApiKey.trim());
   const managedAvailable = isManagedConfigured();
 
   useEffect(() => {
-    void getSettings().then(setSettings);
+    void getSettings().then((stored) => {
+      setSettings(stored);
+      setLoaded(true);
+    });
+  }, []);
+
+  useEffect(() => {
+    settingsRef.current = settings;
+    if (!loaded) return;
+    if (skipAutosaveRef.current) {
+      skipAutosaveRef.current = false;
+      return;
+    }
+    pendingSaveRef.current = settings;
+    const timer = window.setTimeout(() => {
+      pendingSaveRef.current = null;
+      void saveSettings(settings).then(() => flash('Saved'));
+    }, AUTOSAVE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+  }, [settings, loaded]);
+
+  useEffect(() => {
+    const flush = () => {
+      const pending = pendingSaveRef.current;
+      if (!pending) return;
+      pendingSaveRef.current = null;
+      void saveSettings(pending);
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+    };
   }, []);
 
   useEffect(() => {
@@ -444,13 +744,17 @@ export default function App() {
 
   const flash = (message: string) => {
     setStatus(message);
-    window.setTimeout(() => setStatus(''), 2500);
+    window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => setStatus(''), 2500);
   };
 
-  const onSave = async (event: FormEvent) => {
-    event.preventDefault();
-    await saveSettings(settings);
-    flash('Saved.');
+  /** Saves immediately with its own message instead of the autosave's. */
+  const commit = async (next: Settings, message: string) => {
+    skipAutosaveRef.current = true;
+    pendingSaveRef.current = null;
+    setSettings(next);
+    await saveSettings(next);
+    flash(message);
   };
 
   const onConnect = async () => {
@@ -458,14 +762,10 @@ export default function App() {
     setConnecting(true);
     try {
       const openRouterApiKey = await connectOpenRouter();
-      const next = {
-        ...settings,
-        providerMode: 'byok' as const,
-        openRouterApiKey,
-      };
-      setSettings(next);
-      await saveSettings(next);
-      flash('Connected.');
+      await commit(
+        { ...settingsRef.current, providerMode: 'byok', openRouterApiKey },
+        'Connected',
+      );
     } catch (error) {
       setConnectError(
         error instanceof Error ? error.message : 'Connect failed',
@@ -477,219 +777,187 @@ export default function App() {
 
   const onDisconnect = async () => {
     setConnectError('');
-    const next = { ...settings, openRouterApiKey: '' };
-    setSettings(next);
-    await saveSettings(next);
-    flash('Disconnected.');
+    await commit({ ...settings, openRouterApiKey: '' }, 'Disconnected');
   };
 
-  const onUseManaged = async () => {
-    const next = { ...settings, providerMode: 'managed' as const };
-    setSettings(next);
-    await saveSettings(next);
-    flash('Managed listening active.');
-  };
+  const onUseManaged = () =>
+    commit({ ...settings, providerMode: 'managed' }, 'Using Autovox credits');
 
-  const onUseByok = async () => {
-    const next = { ...settings, providerMode: 'byok' as const };
-    setSettings(next);
-    await saveSettings(next);
-    flash('Your provider active.');
-  };
+  const onUseByok = () =>
+    commit({ ...settings, providerMode: 'byok' }, 'Using your provider');
 
   return (
     <div className="page">
-      <h1>Autovox</h1>
-      <p className="lead">
-        Choose funded managed listening or bring your own provider
-      </p>
+      <header className="page__header">
+        <h1>Autovox</h1>
+        <span className="status" role="status">
+          {status}
+        </span>
+      </header>
 
-      <form className="form" onSubmit={(e) => void onSave(e)}>
-        {managedAvailable ? (
-          <ManagedPanel
-            active={settings.providerMode === 'managed'}
-            onUseManaged={onUseManaged}
-          />
-        ) : null}
+      <main className="panel">
+        <div className="panel__col panel__col--account">
+          {managedAvailable ? (
+            <ManagedPanel
+              active={settings.providerMode === 'managed'}
+              onUseManaged={onUseManaged}
+            />
+          ) : null}
 
-        <section className="auth-block">
-          <h2 className="auth-block__title">Bring your own provider</h2>
-          <p className="hint auth-block__copy">
-            OpenRouter OAuth or a pasted OpenAI key. Your key stays on this
-            browser profile.
-          </p>
+          <section className="auth-block">
+            <h2 className="auth-block__title">Bring your own provider</h2>
+            <p className="hint auth-block__copy">
+              Connect OpenRouter, or paste an OpenAI key. Keys stay in this
+              browser profile.
+            </p>
 
-          {connected ? (
-            <div className="auth-block__status">
-              <p className="auth-block__connected">Connected via OpenRouter</p>
-              <p className="hint mono">{maskKey(settings.openRouterApiKey)}</p>
-              <button
-                type="button"
-                className="btn-secondary"
-                onClick={() => void onDisconnect()}
-              >
-                Disconnect
-              </button>
-              {settings.providerMode !== 'byok' ? (
+            {connected ? (
+              <div className="auth-block__status">
+                <p className="auth-block__connected">Connected via OpenRouter</p>
+                <p className="hint mono">{maskKey(settings.openRouterApiKey)}</p>
                 <button
                   type="button"
-                  className="btn-primary"
-                  onClick={() => void onUseByok()}
+                  className="btn-secondary"
+                  onClick={() => void onDisconnect()}
                 >
-                  Use this provider
+                  Disconnect
                 </button>
-              ) : null}
-            </div>
-          ) : (
-            <button
-              type="button"
-              className="btn-primary"
-              disabled={connecting}
-              onClick={() => void onConnect()}
-            >
-              {connecting ? 'Connecting…' : 'Connect with OpenRouter'}
-            </button>
-          )}
+                {settings.providerMode !== 'byok' ? (
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={() => void onUseByok()}
+                  >
+                    Use this provider
+                  </button>
+                ) : null}
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn-primary"
+                disabled={connecting}
+                onClick={() => void onConnect()}
+              >
+                {connecting ? 'Connecting…' : 'Connect with OpenRouter'}
+              </button>
+            )}
 
-          {connectError ? <p className="hint warn">{connectError}</p> : null}
-        </section>
+            {connectError ? <p className="hint warn">{connectError}</p> : null}
 
-        <label>
-          OpenAI API key (fallback)
-          <input
-            type="password"
-            autoComplete="off"
-            value={settings.apiKey}
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                providerMode: 'byok',
-                apiKey: e.target.value,
-              }))
-            }
-            placeholder="sk-…"
-          />
-          <p className="hint">
-            Used when OpenRouter is not connected. Calls OpenAI directly from
-            this browser profile.
-          </p>
-        </label>
+            <label>
+              OpenAI API key
+              <input
+                type="password"
+                autoComplete="off"
+                value={settings.apiKey}
+                onChange={(e) =>
+                  setSettings((s) => ({
+                    ...s,
+                    providerMode: 'byok',
+                    apiKey: e.target.value,
+                  }))
+                }
+                placeholder="sk-…"
+              />
+              <p className="hint">
+                Used only when OpenRouter isn’t connected.
+              </p>
+            </label>
+          </section>
 
-        {settings.providerMode === 'byok' ? (
-          <ModelsPanel settings={settings} setSettings={setSettings} />
-        ) : (
-          <p className="hint">
-            Managed listening uses {DEFAULT_COMPREHENSION_MODEL} and{' '}
-            {DEFAULT_TTS_MODEL}.
-          </p>
-        )}
-
-        <label>
-          Voice
-          <select
-            value={settings.voice}
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                voice: e.target.value as VoiceId,
-              }))
-            }
-          >
-            {VOICES.map((voice) => (
-              <option key={voice.id} value={voice.id}>
-                {voice.label}
-              </option>
-            ))}
-          </select>
-          <p className="hint">
-            OpenAI audio voices. Sage is a solid news-anchor default.
-          </p>
-        </label>
-
-        <label>
-          Output language
-          <select
-            value={settings.outputLanguage}
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                outputLanguage: e.target.value as OutputLanguage,
-              }))
-            }
-          >
-            {OUTPUT_LANGUAGES.map((lang) => (
-              <option key={lang.code} value={lang.code}>
-                {lang.label}
-              </option>
-            ))}
-          </select>
-          <p className="hint">
-            Auto matches the article&apos;s language. Choose a language to
-            translate the report and narration. OpenAI audio models support the
-            languages listed here; voices are English-optimized.
-          </p>
-        </label>
-
-        <label>
-          Report length
-          <select
-            value={settings.reportLength}
-            onChange={(e) =>
-              setSettings((s) => ({
-                ...s,
-                reportLength: e.target.value as ReportLength,
-              }))
-            }
-          >
-            <option value="short">Short (~1–1.5 min)</option>
-            <option value="standard">Standard (~2–3.5 min)</option>
-            <option value="deep">Deep (~3.5–5 min)</option>
-          </select>
-        </label>
-
-        <div className="actions">
-          <button type="submit">Save</button>
-          <span className="status">{status}</span>
+          {settings.providerMode === 'byok' ? (
+            <SpendPanel spend={spend} />
+          ) : null}
         </div>
-      </form>
 
-      {settings.providerMode === 'byok' ? (
-      <section className="spend" aria-labelledby="spend-title">
-        <h2 id="spend-title" className="spend__title">
-          Spend
-        </h2>
-        <p className="spend__hero">
-          {spend
-            ? `${formatUsd(spend.totalUsd)} across ${spend.briefCount} brief${spend.briefCount === 1 ? '' : 's'}`
-            : 'This profile'}
-        </p>
-        <dl className="spend__meter">
-          <div>
-            <dt>Faults wasted</dt>
-            <dd>{spend ? formatUsd(spend.wastedUsd) : '—'}</dd>
-          </div>
-          <div>
-            <dt>Completed avg</dt>
-            <dd>
-              {spend?.averageCompletedUsd != null
-                ? formatUsd(spend.averageCompletedUsd)
-                : '—'}
-            </dd>
-          </div>
-          <div>
-            <dt>Last 7 days</dt>
-            <dd>{spend ? formatUsd(spend.last7dUsd) : '—'}</dd>
-          </div>
-        </dl>
-        <p className="hint">
-          Dollars on this profile only — Autovox never sees them. OpenRouter
-          reports cost; a pasted OpenAI key usually cannot.
-          {spend && spend.costUnknownCount > 0
-            ? ` ${spend.costUnknownCount} event${spend.costUnknownCount === 1 ? '' : 's'} have no USD.`
-            : ''}
-        </p>
-      </section>
-      ) : null}
+        <div className="panel__col panel__col--listening">
+          <section className="listening" aria-labelledby="listening-title">
+            <h2 id="listening-title" className="auth-block__title">
+              Listening
+            </h2>
+
+            <fieldset className="choice-group">
+              <legend>Voice</legend>
+              <div className="choices choices--voices">
+                {VOICES.map((voice) => (
+                  <label key={voice.id} className="choice">
+                    <input
+                      type="radio"
+                      name="voice"
+                      value={voice.id}
+                      checked={settings.voice === voice.id}
+                      onChange={() =>
+                        setSettings((s) => ({ ...s, voice: voice.id as VoiceId }))
+                      }
+                    />
+                    <span className="choice__face">{voice.label}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="choice-group">
+              <legend>Report length</legend>
+              <div className="choices choices--lengths">
+                {REPORT_LENGTHS.map((length) => (
+                  <label key={length.id} className="choice">
+                    <input
+                      type="radio"
+                      name="reportLength"
+                      value={length.id}
+                      checked={settings.reportLength === length.id}
+                      onChange={() =>
+                        setSettings((s) => ({ ...s, reportLength: length.id }))
+                      }
+                    />
+                    <span className="choice__face">
+                      {length.label}
+                      <span className="choice__detail">{length.minutes}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+              {managedAvailable ? (
+                <p className="hint">Deep briefs use 2 credits.</p>
+              ) : null}
+            </fieldset>
+
+          <label>
+            Output language
+            <select
+              value={settings.outputLanguage}
+              onChange={(e) =>
+                setSettings((s) => ({
+                  ...s,
+                  outputLanguage: e.target.value as OutputLanguage,
+                }))
+              }
+            >
+              {OUTPUT_LANGUAGES.map((lang) => (
+                <option key={lang.code} value={lang.code}>
+                  {lang.label}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              Auto uses the article&apos;s language. Pick another to translate
+              the report. Voices sound most natural in English.
+            </p>
+          </label>
+
+          </section>
+
+          {settings.providerMode === 'byok' ? (
+            <ModelsPanel settings={settings} setSettings={setSettings} />
+          ) : (
+            <p className="hint">
+              Credits use {DEFAULT_COMPREHENSION_MODEL} to write and{' '}
+              {DEFAULT_TTS_MODEL} to narrate.
+            </p>
+          )}
+        </div>
+      </main>
     </div>
   );
 }
