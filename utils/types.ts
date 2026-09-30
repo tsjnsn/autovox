@@ -4,7 +4,11 @@ import {
   DEFAULT_OUTPUT_LANGUAGE,
 } from './languages';
 
-import { DEFAULT_COMPREHENSION_MODEL, DEFAULT_TTS_MODEL } from './models';
+import {
+  DEFAULT_COMPREHENSION_MODEL,
+  DEFAULT_DRAWING_MODEL,
+  DEFAULT_TTS_MODEL,
+} from './models';
 import type {
   ChalkLesson,
   ChalkSceneDrawing,
@@ -48,6 +52,8 @@ export interface Settings {
   outputLanguage: OutputLanguage;
   /** BYOK comprehension model id (managed listening ignores it). */
   comprehensionModel: string;
+  /** BYOK chalkboard drawing model id; empty uses the comprehension model. */
+  drawingModel: string;
   /** BYOK narration model id (managed listening ignores it). */
   ttsModel: string;
 }
@@ -183,6 +189,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reportLength: 'standard',
   outputLanguage: DEFAULT_OUTPUT_LANGUAGE,
   comprehensionModel: DEFAULT_COMPREHENSION_MODEL,
+  drawingModel: DEFAULT_DRAWING_MODEL,
   ttsModel: DEFAULT_TTS_MODEL,
 };
 
