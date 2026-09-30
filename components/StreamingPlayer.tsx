@@ -17,7 +17,7 @@ import { buildTtsChunks, streamSegmentPcm } from '../utils/tts';
 import type { ChalkTimeline } from '../utils/chalk/types';
 import type { ProviderUsage } from '../utils/usage';
 import type { NewsReportScript, OutputLanguage, VoiceId } from '../utils/types';
-import { PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
+import { MutedIcon, PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
 
 interface StreamingPlayerProps {
   script: NewsReportScript;
@@ -42,6 +42,8 @@ interface StreamingPlayerProps {
   onChunkTimeline?: (timeline: ChalkTimeline) => void;
   /** Filled with a reader for the playhead (seconds), for per-frame sync. */
   clockRef?: MutableRefObject<(() => number) | null>;
+  /** The full narration PCM once every chunk has downloaded; null whenever the cache resets. */
+  onNarration?: (pcm: Uint8Array | null) => void;
 }
 
 type TransportPhase = 'loading' | 'playing' | 'paused' | 'ready';
@@ -79,11 +81,13 @@ export function StreamingPlayer({
   prefetch = 0,
   onChunkTimeline,
   clockRef,
+  onNarration,
 }: StreamingPlayerProps) {
   const playerRef = useRef<PcmStreamPlayer | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const runIdRef = useRef(0);
   const volumeRef = useRef(0.85);
+  const unmuteVolumeRef = useRef(0.85);
   const cacheChunksRef = useRef<Uint8Array[]>([]);
   const cacheBytesRef = useRef(0);
   const cachePcmRef = useRef<Uint8Array | null>(null);
@@ -105,6 +109,8 @@ export function StreamingPlayer({
   const onUsageRef = useRef(onUsage);
   const onChunkTimelineRef = useRef(onChunkTimeline);
   onChunkTimelineRef.current = onChunkTimeline;
+  const onNarrationRef = useRef(onNarration);
+  onNarrationRef.current = onNarration;
   onPlayingRef.current = onPlaying;
   onDoneRef.current = onDone;
   onErrorRef.current = onError;
@@ -136,6 +142,7 @@ export function StreamingPlayer({
   const [needsGesture, setNeedsGesture] = useState(false);
   const [error, setError] = useState('');
   const [volume, setVolume] = useState(0.85);
+  const [volumeDragging, setVolumeDragging] = useState(false);
   const [canScrub, setCanScrub] = useState(false);
   const [duration, setDuration] = useState(estimatedSeconds);
   const [bufferedSeconds, setBufferedSeconds] = useState(0);
@@ -197,6 +204,7 @@ export function StreamingPlayer({
     setDuration(estimatedSeconds);
     durationRef.current = estimatedSeconds;
     setPosition(0);
+    onNarrationRef.current?.(null);
   }, [estimatedSeconds]);
 
   const markCacheComplete = useCallback(() => {
@@ -210,6 +218,7 @@ export function StreamingPlayer({
     setDuration(secs);
     setCanScrub(secs > 0);
     playerRef.current?.setDuration(secs);
+    onNarrationRef.current?.(pcm.byteLength > 0 ? pcm : null);
   }, []);
 
   const getCachedPcm = useCallback(() => {
@@ -615,6 +624,15 @@ export function StreamingPlayer({
     return Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
   };
 
+  const toggleMute = () => {
+    if (volume > 0) {
+      unmuteVolumeRef.current = volume;
+      setVolume(0);
+    } else {
+      setVolume(unmuteVolumeRef.current || 0.85);
+    }
+  };
+
   return (
     <div className="player">
       <div className="player__bar">
@@ -626,6 +644,68 @@ export function StreamingPlayer({
         >
           {showPlaying ? <PauseIcon /> : <PlayIcon />}
         </button>
+        <div
+          className={`player__volume${volumeDragging ? ' player__volume--open' : ''}`}
+        >
+          <button
+            type="button"
+            className="player__volume-btn"
+            onClick={toggleMute}
+            aria-label={volume === 0 ? 'Unmute' : 'Mute'}
+          >
+            {volume === 0 ? <MutedIcon /> : <VolumeIcon />}
+          </button>
+          <div
+            ref={volumeRailRef}
+            className="player__volume-scrub"
+            role="slider"
+            tabIndex={0}
+            aria-label="Volume"
+            aria-valuemin={0}
+            aria-valuemax={1}
+            aria-valuenow={volume}
+            aria-valuetext={`${Math.round(volume * 100)}%`}
+            onPointerDown={(e) => {
+              e.currentTarget.setPointerCapture(e.pointerId);
+              volumeDraggingRef.current = true;
+              setVolumeDragging(true);
+              setVolume(volumeFromPointer(e.clientX));
+            }}
+            onPointerMove={(e) => {
+              if (!volumeDraggingRef.current) return;
+              setVolume(volumeFromPointer(e.clientX));
+            }}
+            onPointerUp={() => {
+              volumeDraggingRef.current = false;
+              setVolumeDragging(false);
+            }}
+            onPointerCancel={() => {
+              volumeDraggingRef.current = false;
+              setVolumeDragging(false);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
+                e.preventDefault();
+                setVolume((v) => Math.max(0, v - 0.05));
+              } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
+                e.preventDefault();
+                setVolume((v) => Math.min(1, v + 0.05));
+              }
+            }}
+          >
+            <div className="player__volume-rail">
+              <div
+                className="player__volume-fill"
+                style={{ width: `${volume * 100}%` }}
+              />
+            </div>
+            <div
+              className="player__volume-thumb"
+              style={{ left: `${volume * 100}%` }}
+              aria-hidden="true"
+            />
+          </div>
+        </div>
         <div
           ref={scrubRef}
           className={`player__scrub${canScrub ? ' player__scrub--active' : ''}${phase === 'loading' && !canScrub ? ' player__scrub--loading' : ''}`}
@@ -677,57 +757,6 @@ export function StreamingPlayer({
         >
           {label || '\u00a0'}
         </span>
-      </div>
-      <div className="player__volume">
-        <span className="player__volume-icon" aria-hidden="true">
-          <VolumeIcon />
-        </span>
-        <div
-          ref={volumeRailRef}
-          className="player__volume-scrub"
-          role="slider"
-          tabIndex={0}
-          aria-label="Volume"
-          aria-valuemin={0}
-          aria-valuemax={1}
-          aria-valuenow={volume}
-          onPointerDown={(e) => {
-            e.currentTarget.setPointerCapture(e.pointerId);
-            volumeDraggingRef.current = true;
-            setVolume(volumeFromPointer(e.clientX));
-          }}
-          onPointerMove={(e) => {
-            if (!volumeDraggingRef.current) return;
-            setVolume(volumeFromPointer(e.clientX));
-          }}
-          onPointerUp={() => {
-            volumeDraggingRef.current = false;
-          }}
-          onPointerCancel={() => {
-            volumeDraggingRef.current = false;
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'ArrowLeft' || e.key === 'ArrowDown') {
-              e.preventDefault();
-              setVolume((v) => Math.max(0, v - 0.05));
-            } else if (e.key === 'ArrowRight' || e.key === 'ArrowUp') {
-              e.preventDefault();
-              setVolume((v) => Math.min(1, v + 0.05));
-            }
-          }}
-        >
-          <div className="player__volume-rail">
-            <div
-              className="player__volume-fill"
-              style={{ width: `${volume * 100}%` }}
-            />
-          </div>
-          <div
-            className="player__volume-thumb"
-            style={{ left: `${volume * 100}%` }}
-            aria-hidden="true"
-          />
-        </div>
       </div>
     </div>
   );

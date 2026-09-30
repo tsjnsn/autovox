@@ -21,3 +21,11 @@ export function VolumeIcon() {
     </svg>
   );
 }
+
+export function MutedIcon() {
+  return (
+    <svg className="player__svg player__svg--sm" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M3 9v6h4l5 5V4L7 9H3zm11.3.7 1.4-1.4 2.3 2.3 2.3-2.3 1.4 1.4-2.3 2.3 2.3 2.3-1.4 1.4-2.3-2.3-2.3 2.3-1.4-1.4 2.3-2.3z" />
+    </svg>
+  );
+}
