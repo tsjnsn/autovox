@@ -3,6 +3,7 @@ import './chalkboard.css';
 import ReactDOM from 'react-dom/client';
 import { OverlayApp } from '../../components/OverlayApp';
 import { extractArticleFromDocument } from '../../utils/extract';
+import { enableShadowCopy } from '../../utils/shadowCopy';
 import { keepOnTop } from '../../utils/topLayer';
 import type { ExtensionMessage } from '../../utils/types';
 
@@ -31,7 +32,7 @@ export default defineContentScript({
         anchor: 'body',
         append: 'last',
         isolateEvents: true,
-        onMount: (container, _shadow, shadowHost) => {
+        onMount: (container, shadow, shadowHost) => {
           const host = document.createElement('div');
           host.className = 'autovox-host';
           host.setAttribute('data-autovox', 'host');
@@ -42,9 +43,14 @@ export default defineContentScript({
 
           const root = ReactDOM.createRoot(app);
           root.render(<OverlayApp onClose={removeUi} />);
-          return { root, releaseTop: keepOnTop(shadowHost) };
+          return {
+            root,
+            releaseTop: keepOnTop(shadowHost),
+            releaseCopy: enableShadowCopy(shadow),
+          };
         },
         onRemove: (mounted) => {
+          mounted?.releaseCopy();
           mounted?.releaseTop();
           mounted?.root.unmount();
         },

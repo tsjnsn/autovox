@@ -143,30 +143,11 @@
   font-family: var(--av-font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
 }
 
 .autovox-btn--ghost:hover:not(:disabled) {
   color: var(--av-ink);
   background: transparent;
-}
-
-.autovox-btn--close {
-  letter-spacing: 0.08em;
-}
-
-.autovox-msg {
-  margin: 0;
-  font-family: var(--av-font-mono);
-  font-size: 11px;
-  color: var(--av-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.autovox-msg--error {
-  color: var(--av-danger);
 }
 
 .autovox-link {
@@ -177,8 +158,6 @@
   font-family: var(--av-font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--av-ink);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -199,29 +178,15 @@
   cursor: not-allowed;
 }
 
-.autovox-result {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
+.autovox-link--error {
+  color: var(--av-danger);
 }
 
 .autovox-source {
   margin: 0;
-  font-family: var(--av-font-mono);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
+  font-size: 11px;
   color: var(--av-muted);
   line-height: 1.4;
-  letter-spacing: 0.01em;
-}
-
-.autovox-notice {
-  margin: 0;
-  font-family: var(--av-font-mono);
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--av-muted);
 }
 
 /* Transport — meter */
@@ -255,7 +220,6 @@
 }
 
 .player__icon-btn:hover:not(:disabled) {
-  filter: none;
   background: var(--av-accent);
   border-color: var(--av-ink);
   color: var(--av-accent-ink);
@@ -312,7 +276,7 @@
 .player__scrub {
   position: relative;
   flex: 1 1 auto;
-  min-width: 48px;
+  min-width: 32px;
   height: 22px;
   display: flex;
   align-items: center;
@@ -406,37 +370,65 @@
 
 .player__label--error {
   color: var(--av-danger);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
 }
 
 .player__label--empty {
   opacity: 0;
 }
 
+/* YouTube-style: speaker toggles mute; the slider opens beside it on hover or focus. */
 .player__volume {
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding-left: 2px;
 }
 
-.player__volume-icon {
-  flex: 0 0 auto;
+.player__volume-btn {
+  appearance: none;
+  width: 24px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: transparent;
   color: var(--av-ink);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.player__volume-btn .player__svg {
+  width: 16px;
+  height: 16px;
+}
+
+.player__volume-btn:hover {
+  color: var(--av-accent);
+}
+
+.player__volume-btn:focus-visible {
+  outline: 2px solid var(--av-accent);
+  outline-offset: -2px;
 }
 
 .player__volume-scrub {
   position: relative;
-  flex: 1 1 auto;
+  width: 0;
   height: 18px;
   display: flex;
   align-items: center;
+  visibility: hidden;
   touch-action: none;
   cursor: pointer;
   outline: none;
+}
+
+.player__volume:hover .player__volume-scrub,
+.player__volume:focus-within .player__volume-scrub,
+.player__volume--open .player__volume-scrub {
+  width: 48px;
+  margin: 0 6px 0 2px;
+  visibility: visible;
 }
 
 .player__volume-rail {
@@ -479,8 +471,6 @@
   font-family: var(--av-font-mono);
   font-size: 11px;
   font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   cursor: pointer;
   text-align: left;
   text-decoration: underline;
@@ -493,12 +483,10 @@
 
 .script__headline {
   margin: 8px 0 4px;
-  font-family: var(--av-font-brand);
-  font-size: 15px;
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
+  font-family: var(--av-font-ui);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
 }
 
 .script__meta {
@@ -506,9 +494,15 @@
   font-family: var(--av-font-mono);
   font-size: 10px;
   font-variant-numeric: tabular-nums;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   color: var(--av-muted);
+}
+
+/* Explicit `text`: `auto` inherits `none` from pages that disable selection. */
+.script__headline,
+.script__text,
+.autovox-source {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .script__text {
