@@ -42,6 +42,10 @@ export async function getSettings(): Promise<Settings> {
       merged.comprehensionModel,
       DEFAULT_SETTINGS.comprehensionModel,
     ),
+    drawingModel:
+      typeof merged.drawingModel === 'string'
+        ? merged.drawingModel.trim()
+        : DEFAULT_SETTINGS.drawingModel,
     ttsModel: coerceModel(merged.ttsModel, DEFAULT_SETTINGS.ttsModel),
   };
 }

@@ -216,7 +216,8 @@ export async function runBriefPipeline(
         },
   );
 
-  const comprehensionModel = activeModels(settings).comprehension;
+  const { comprehension: comprehensionModel, drawing: drawingModel } =
+    activeModels(settings);
   let script: NewsReportScript;
   let lesson: ChalkLesson | undefined;
   try {
@@ -302,7 +303,7 @@ export async function runBriefPipeline(
         sessionId,
         lesson,
         auth,
-        model: comprehensionModel,
+        model: drawingModel,
         outputLanguage: settings.outputLanguage,
         signal,
       })

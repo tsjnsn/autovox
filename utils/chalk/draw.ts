@@ -1,7 +1,7 @@
 import type { LlmAuth } from '../auth';
 import { getLanguageName } from '../languages';
-import { createStructuredResponse } from '../openai';
-import type { ProviderUsage } from '../usage';
+import { approxTokens, createStructuredResponse, type StreamProgress } from '../openai';
+import { emptyUsage, type ProviderUsage } from '../usage';
 import type { OutputLanguage } from '../types';
 import {
   BOARD_HEADING_BAND,
@@ -46,6 +46,14 @@ const ELEMENT_KINDS: readonly ChalkElementKind[] = [
 ];
 
 const MAX_ELEMENTS = 40;
+/** A full board is ~1–2k tokens of JSON plus low-effort reasoning. */
+const DRAW_MAX_OUTPUT_TOKENS = 8000;
+/** Ceiling per attempt; slow hosts that keep streaming get this long to finish. */
+const DRAW_ATTEMPT_TIMEOUT_MS = 180_000;
+/** An attempt with no streamed tokens for this long has stalled. */
+const DRAW_IDLE_TIMEOUT_MS = 45_000;
+/** Reasoning tokens allowed before any drawing output; well above what "low" effort uses. */
+const DRAW_REASONING_LIMIT = 3000;
 const MAX_PATH_POINTS = 60;
 const MAX_LABEL = 24;
 const MAX_SAY = 40;
@@ -76,12 +84,10 @@ const drawingSchema = {
             curve: nullableNumber,
             text: { type: ['string', 'null'] },
             say: { type: ['string', 'null'] },
-            pose: { type: ['string', 'null'], enum: [...CHALK_POSES, null] },
-            face: { type: ['string', 'null'], enum: [...CHALK_FACES, null] },
-            accessory: {
-              type: ['string', 'null'],
-              enum: [...CHALK_ACCESSORIES, null],
-            },
+            // Anthropic rejects enums whose type is a ['string', 'null'] union.
+            pose: { type: 'string', enum: [...CHALK_POSES] },
+            face: { type: 'string', enum: [...CHALK_FACES] },
+            accessory: { type: 'string', enum: [...CHALK_ACCESSORIES] },
             points: { type: ['array', 'null'], items: { type: 'number' } },
             closed: { type: ['boolean', 'null'] },
           },
@@ -129,7 +135,7 @@ COMPOSITION
 - Arrows for flow and cause; check / cross for do / don't; path for graphs, curves, and waves.
 
 ELEMENT FIELDS
-Every element lists every field; set fields that do not apply to its kind to null.
+Every element lists every field; set fields that do not apply to its kind to null, except pose, face, and accessory, which non-figure elements set to "stand", "neutral", and "none".
 - kind; beat = 0-based index of the beat at which it is drawn; color.
 - figure: x = body center, y = feet, size = total height (60–320), pose, face, accessory, text = name label under the figure or null, say = speech bubble or null.
 - text: x, y = top-left, size = letter height (16–64, ~30), text = the words (up to 4 lines, separated by \\n).
@@ -199,12 +205,38 @@ ${beats}
 Return the elements for this board, using ${lastBeat === 0 ? 'beat 0 only' : `beat values 0–${lastBeat}`}.`;
 }
 
+/** The exact prompts and schema a scene drawing request sends. */
+export function drawSceneRequest(
+  lesson: ChalkLesson,
+  sceneIndex: number,
+  outputLanguage: OutputLanguage,
+): {
+  system: string;
+  user: string;
+  jsonSchema: { name: string; schema: Record<string, unknown> };
+} {
+  const scene = lesson.scenes[sceneIndex];
+  if (!scene) {
+    throw new RangeError(`No scene at index ${sceneIndex}`);
+  }
+  return {
+    system: SYSTEM_PROMPT,
+    user: buildUserPrompt(lesson, scene, sceneIndex, outputLanguage),
+    jsonSchema: {
+      name: drawingSchema.name,
+      schema: drawingSchema.schema as unknown as Record<string, unknown>,
+    },
+  };
+}
+
 export async function drawScene(options: {
   auth: LlmAuth;
   model: string;
   lesson: ChalkLesson;
   sceneIndex: number;
   outputLanguage: OutputLanguage;
+  /** Reports streamed token progress as it arrives. */
+  onProgress?: (progress: StreamProgress) => void;
   signal?: AbortSignal;
 }): Promise<{ drawing: ChalkSceneDrawing; usage: ProviderUsage }> {
   const scene = options.lesson.scenes[options.sceneIndex];
@@ -212,23 +244,57 @@ export async function drawScene(options: {
     throw new RangeError(`No scene at index ${options.sceneIndex}`);
   }
 
-  const { text: content, usage } = await createStructuredResponse({
-    auth: options.auth,
-    model: options.model,
-    system: SYSTEM_PROMPT,
-    user: buildUserPrompt(
-      options.lesson,
-      scene,
-      options.sceneIndex,
-      options.outputLanguage,
-    ),
-    reasoningEffort: 'low',
-    jsonSchema: {
-      name: drawingSchema.name,
-      schema: drawingSchema.schema as unknown as Record<string, unknown>,
-    },
-    signal: options.signal,
-  });
+  // Streaming separates a slow host that is still producing tokens (let it
+  // finish) from a stalled one or a model that ignores "low" effort and
+  // reasons without drawing (cut it off early).
+  const guard = new AbortController();
+  let stopReason = '';
+  const stop = (reason: string) => {
+    if (guard.signal.aborted) return;
+    stopReason = reason;
+    guard.abort();
+  };
+  let idleTimer = setTimeout(
+    () => stop(`No tokens for ${DRAW_IDLE_TIMEOUT_MS / 1000}s`),
+    DRAW_IDLE_TIMEOUT_MS,
+  );
+  const signal = options.signal
+    ? AbortSignal.any([options.signal, guard.signal])
+    : guard.signal;
+  let result: { text: string; usage: ProviderUsage };
+  try {
+    result = await createStructuredResponse({
+      auth: options.auth,
+      model: options.model,
+      ...drawSceneRequest(options.lesson, options.sceneIndex, options.outputLanguage),
+      reasoningEffort: 'low',
+      maxOutputTokens: DRAW_MAX_OUTPUT_TOKENS,
+      hostSort: 'throughput',
+      onProgress: (progress) => {
+        options.onProgress?.(progress);
+        clearTimeout(idleTimer);
+        idleTimer = setTimeout(
+          () => stop(`No tokens for ${DRAW_IDLE_TIMEOUT_MS / 1000}s`),
+          DRAW_IDLE_TIMEOUT_MS,
+        );
+        if (
+          progress.outputChars === 0 &&
+          approxTokens(progress.reasoningChars) > DRAW_REASONING_LIMIT
+        ) {
+          stop(`Reasoned past ${DRAW_REASONING_LIMIT} tokens without drawing`);
+        }
+      },
+      signal,
+    });
+  } catch (error) {
+    if (guard.signal.aborted && !options.signal?.aborted) {
+      throw new DrawError(stopReason, emptyUsage());
+    }
+    throw error;
+  } finally {
+    clearTimeout(idleTimer);
+  }
+  const { text: content, usage } = result;
 
   let raw: unknown;
   try {
@@ -532,6 +598,8 @@ export async function drawLessonScenes(options: {
     drawing: ChalkSceneDrawing,
   ) => void | Promise<void>;
   onUsage?: (usage: ProviderUsage) => void | Promise<void>;
+  /** Streams each board and reports its token progress; `attempt` counts from 1. */
+  onProgress?: (sceneIndex: number, attempt: number, progress: StreamProgress) => void;
   /** Test seam; defaults to drawScene. */
   draw?: typeof drawScene;
 }): Promise<{ drawn: number; failed: number }> {
@@ -558,6 +626,7 @@ export async function drawLessonScenes(options: {
     sceneIndex: number,
   ): Promise<ChalkSceneDrawing | null> => {
     for (let tries = 0; tries < 2 && !signal?.aborted; tries++) {
+      const timeout = AbortSignal.timeout(DRAW_ATTEMPT_TIMEOUT_MS);
       try {
         const result = await draw({
           auth: options.auth,
@@ -565,11 +634,19 @@ export async function drawLessonScenes(options: {
           lesson: options.lesson,
           sceneIndex,
           outputLanguage: options.outputLanguage,
-          signal,
+          onProgress: options.onProgress
+            ? (progress) => options.onProgress?.(sceneIndex, tries + 1, progress)
+            : undefined,
+          signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
         });
         await reportUsage(result.usage);
         return result.drawing;
       } catch (error) {
+        if (signal?.aborted) break;
+        console.warn(
+          `[autovox] chalk scene ${sceneIndex} draw attempt ${tries + 1} failed`,
+          error,
+        );
         if (error instanceof DrawError) await reportUsage(error.usage);
       }
     }
