@@ -12,7 +12,7 @@
 
 - On-page overlay player (toolbar icon toggles it)
 - Right-click **Vox this page** opens Autovox and starts the brief
-- **Chalkboard** (overlay link or right-click **Chalkboard this page**) turns a tutorial into a narrated lesson while stick-figure chalk scenes are drawn in sync with the voice — scrub, pause, and replay keep the board on the words being spoken
+- **Chalkboard** (overlay link or right-click **Chalkboard this page**) turns a tutorial into a narrated lesson while stick-figure chalk scenes are drawn in sync with the voice — scrub, pause, and replay keep the board on the words being spoken. **Export video** saves the board and narration as an MP4 (WebM where MP4 isn't available), rendered locally in the browser
 - Play starts the brief when idle — one transport control
 - Progressive scrubber (buffered + played), seek within downloaded audio
 - In-memory PCM cache for replay without re-calling TTS

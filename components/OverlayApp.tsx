@@ -15,6 +15,7 @@ import {
 import { getSettings } from '../utils/storage';
 import { activeModels } from '../utils/models';
 import { buildTeacherInstructions, lessonTtsChunks } from '../utils/tts';
+import { downloadVideo, renderChalkVideo } from '../utils/chalk/video';
 import type {
   ChalkSceneDrawing,
   ChalkTimeline,
@@ -75,7 +76,7 @@ function meterLabel(
       lower.includes('connect') ||
       lower.includes('provider')
     ) {
-      return 'No auth';
+      return 'Needs setup';
     }
     return 'Fault';
   }
@@ -106,6 +107,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     useState<LlmAuth | null>(null);
   const [timeline, setTimeline] = useState<ChalkTimeline>(EMPTY_TIMELINE);
   const clockRef = useRef<(() => number) | null>(null);
+  const [narrationPcm, setNarrationPcm] = useState<Uint8Array | null>(null);
+  const [exportPercent, setExportPercent] = useState<number | null>(null);
+  const [exportError, setExportError] = useState('');
+  const exportAbortRef = useRef<AbortController | null>(null);
   const sceneBacklogRef = useRef<SceneBacklog | null>(null);
   const getBoardTime = useCallback(() => clockRef.current?.() ?? 0, []);
 
@@ -283,6 +288,47 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const teacherInstructions =
     lesson && settings ? buildTeacherInstructions(settings.outputLanguage) : undefined;
 
+  const handleNarration = useCallback((pcm: Uint8Array | null) => {
+    exportAbortRef.current?.abort();
+    setExportError('');
+    setNarrationPcm(pcm);
+  }, []);
+
+  useEffect(() => () => exportAbortRef.current?.abort(), []);
+
+  const exportVideo = async () => {
+    if (exportAbortRef.current) {
+      exportAbortRef.current.abort();
+      return;
+    }
+    if (!lesson || !narrationPcm) return;
+    const abort = new AbortController();
+    exportAbortRef.current = abort;
+    setExportError('');
+    setExportPercent(0);
+    try {
+      const video = await renderChalkVideo({
+        lesson,
+        drawings: result?.drawings ?? lesson.scenes.map(() => null),
+        timeline,
+        pcm: narrationPcm,
+        signal: abort.signal,
+        onProgress: (fraction) => setExportPercent(Math.floor(fraction * 100)),
+      });
+      downloadVideo(video);
+    } catch (err) {
+      if (!abort.signal.aborted) {
+        console.warn('[autovox] video export failed', err);
+        setExportError(err instanceof Error ? err.message : 'Video export failed');
+      }
+    } finally {
+      if (exportAbortRef.current === abort) {
+        exportAbortRef.current = null;
+        setExportPercent(null);
+      }
+    }
+  };
+
   useEffect(() => {
     const pageUrl = location.href;
 
@@ -436,6 +482,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     managedRuntimeSessionRef.current = null;
     setManagedPlayerAuth(null);
     setTimeline(EMPTY_TIMELINE);
+    handleNarration(null);
     setResult(null);
     setNarrating(false);
     setExtracting(true);
@@ -459,6 +506,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     managedRuntimeSessionRef.current = null;
     setManagedPlayerAuth(null);
     setTimeline(EMPTY_TIMELINE);
+    handleNarration(null);
     setResult(null);
     setPhase('idle');
     setError('');
@@ -503,7 +551,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   );
 
   const label =
-    hasAuth === false ? 'No auth' : meterLabel(phase, error, extracting);
+    hasAuth === false ? 'Needs setup' : meterLabel(phase, error, extracting);
 
   return (
     <div className={`autovox-card${lesson ? ' autovox-card--board' : ''}`}>
@@ -539,6 +587,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               prefetch={lesson ? 2 : 0}
               onChunkTimeline={lesson ? setTimeline : undefined}
               clockRef={lesson ? clockRef : undefined}
+              onNarration={lesson ? handleNarration : undefined}
               auth={playerAuth!}
               model={activeModels(settings!).tts}
               voice={settings!.voice}
@@ -555,7 +604,6 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               {result!.source.title}
             </p>
             <ScriptPreview script={result!.script} />
-            <p className="autovox-notice">Synthetic voice · not human</p>
           </>
         ) : (
           <div className="player">
@@ -623,6 +671,33 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
                 onClick={() => void startBrief('chalkboard')}
               >
                 Chalkboard
+              </button>
+            </>
+          ) : null}
+          {lesson && narrationPcm ? (
+            <>
+              <span className="autovox-actions__sep" aria-hidden="true">
+                ·
+              </span>
+              <button
+                type="button"
+                className={`autovox-link${exportError && exportPercent === null ? ' autovox-link--error' : ''}`}
+                disabled={extracting}
+                onClick={() => void exportVideo()}
+                title={
+                  exportPercent !== null
+                    ? 'Cancel export'
+                    : exportError ||
+                      (lesson.scenes.some((_, i) => !result?.drawings?.[i]?.elements.length)
+                        ? 'Save as a video. Boards that aren’t drawn yet appear as notes.'
+                        : 'Save the chalkboard and narration as a video')
+                }
+              >
+                {exportPercent !== null
+                  ? `Exporting ${exportPercent}%`
+                  : exportError
+                    ? 'Export failed'
+                    : 'Export video'}
               </button>
             </>
           ) : null}
