@@ -18,6 +18,7 @@
     "pulse": "tsx scripts/store-pulse.ts",
     "money-pulse": "tsx scripts/money-pulse.ts",
     "economics-pulse": "tsx scripts/economics-pulse.ts",
+    "eval:chalk": "tsx scripts/chalk-eval/run.ts",
     "compile": "tsc --noEmit",
     "lint": "eslint . --max-warnings=0",
     "test": "tsx --test tests/*.test.ts",
@@ -32,6 +33,7 @@
     "@mozilla/readability": "^0.6.0",
     "convex": "1.45.0",
     "convex-helpers": "0.1.123",
+    "mediabunny": "1.60.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },

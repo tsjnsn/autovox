@@ -15,9 +15,9 @@ When you start a brief or a chalkboard lesson, Autovox extracts the main article
 
 Depending on the mode selected in Options:
 
-A chalkboard lesson additionally sends the generated lesson script (not the article text) back to the same provider, once per board, to draw its scenes.
+A chalkboard lesson additionally sends the generated lesson script (not the article text) back to the same provider, once per board, to draw its scenes. Exporting a chalkboard as a video happens entirely in your browser: the file is encoded locally from the board and narration already on the page and saved through your browser's download, with nothing sent anywhere.
 
-- **Managed listening:** article text and narration requests are sent directly to [OpenRouter](https://openrouter.ai/) using a short-lived, dollar-capped key funded by Autovox. Requests require zero-data-retention routing and deny provider data collection.
+- **Managed listening:** article text and narration requests are sent directly to [OpenRouter](https://openrouter.ai/) using a short-lived, dollar-capped key funded by Autovox. Requests require zero-data-retention routing and deny provider data collection. Bring-your-own-key OpenRouter requests deny provider data collection but otherwise follow your own OpenRouter privacy settings.
 - **OpenRouter BYOK:** article text and narration requests are sent to OpenRouter (and onward to the models you use there).
 - **OpenAI API key (fallback):** the same requests are sent directly to [OpenAI](https://openai.com/).
 

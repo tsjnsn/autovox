@@ -94,18 +94,17 @@ Avoid: pine/teal “trust” greens, Instrument/Fraunces editorial serif, soft m
 ```
 AUTOVOX                           Close
 
-[▶]  ====meter====   Extract…|0:42|Fault
-     vol ————          (after audio starts)
-
+[▶] ◁) ===meter===   Extract…|0:42|Fault
+                       (speaker after audio starts;
+                        hover/focus opens volume)
 source…                (after script ready)
 Show script
-Synthetic voice · not human
 
 Options · Chalkboard     (idle / brief)
 Options · Clear          (after script ready)
 ```
 
-No logo subtitle. No voice select. No separate Brief button. No Stop.
+No logo subtitle. No voice select. No separate Brief button. No Stop. No volume row: the speaker mutes, and its slider only opens on hover or focus, as on YouTube.
 
 ### Chalkboard session
 
@@ -117,19 +116,18 @@ AUTOVOX                                         Close
 │   /|    label                                    │
 │   / \                                            │
 └──────────────────────────────────────────────────┘
-[▶]  =============meter=============          0:42
-     vol ————
+[▶] ◁) ============meter============          0:42
 source…
 Show script
-Synthetic voice · not human
 
-Options · Clear
+Options · Export video · Clear     (Export video once the narration has fully downloaded)
 ```
 
 - The board is a display on the same instrument, not a second mode: one transport row still drives it, and the chassis only widens.
 - The board is a pure function of the playhead. Scrub, pause, and replay put it exactly where the voice is; it never runs ahead through a buffering gap.
 - The board is never blank or stale: the heading is written first, beat notes stand in until a scene's art arrives, then the art catches up in about a second.
 - **Chalkboard** is a quiet meta link (like Options), never a second primary button. Play still means go.
+- **Export video** is meta too: the link itself shows progress ("Exporting 42%"), clicking it again cancels, and a failure reads "Export failed" in danger ink with the reason on hover. No modal, no second progress bar.
 
 ## Motion
 
