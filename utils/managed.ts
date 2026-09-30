@@ -98,6 +98,7 @@ export async function openManagedSession(options: {
       mode: "openrouter",
       apiKey: opened.apiKey,
       baseUrl: "https://openrouter.ai/api",
+      managed: true,
     },
     expiresAt: opened.expiresAt,
     reservedCredits: opened.reservedCredits,
@@ -125,6 +126,7 @@ export async function getManagedSessionAuth(
     mode: "openrouter",
     apiKey: value.apiKey,
     baseUrl: "https://openrouter.ai/api",
+    managed: true,
   };
 }
 

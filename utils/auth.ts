@@ -5,6 +5,8 @@ export type LlmAuth =
       mode: 'openrouter';
       apiKey: string;
       baseUrl: 'https://openrouter.ai/api';
+      /** Autovox-funded session key; only these must route to ZDR endpoints. */
+      managed?: true;
     }
   | {
       mode: 'apiKey';
@@ -76,6 +78,43 @@ export function authRequestHeaders(auth: LlmAuth): Record<string, string> {
       'https://github.com/tsjnsn/autovox';
   }
   return headers;
+}
+
+/**
+ * OpenRouter provider routing preferences. Managed listening requires ZDR;
+ * BYOK keys follow the user's own OpenRouter privacy settings and guardrails.
+ */
+export function openRouterProviderPrefs(
+  auth: LlmAuth,
+  options: {
+    /**
+     * Route only to hosts that support every parameter sent. Without it,
+     * OpenRouter may pick a host that silently ignores the JSON schema or
+     * reasoning effort, which can stall for minutes.
+     */
+    requireParameters?: boolean;
+    /** Prefer the fastest host over the cheapest; matters for models with many hosts. */
+    sort?: 'throughput' | 'latency';
+  } = {},
+):
+  | {
+      provider: {
+        zdr?: true;
+        data_collection: 'deny';
+        require_parameters?: true;
+        sort?: 'throughput' | 'latency';
+      };
+    }
+  | Record<string, never> {
+  if (auth.mode !== 'openrouter') return {};
+  return {
+    provider: {
+      ...(auth.managed ? { zdr: true as const } : {}),
+      data_collection: 'deny',
+      ...(options.requireParameters ? { require_parameters: true as const } : {}),
+      ...(options.sort ? { sort: options.sort } : {}),
+    },
+  };
 }
 
 export function authApiRoot(auth: LlmAuth): string {
