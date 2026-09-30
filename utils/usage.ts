@@ -36,6 +36,21 @@ function asOptionalInt(value: unknown): number | undefined {
 }
 
 /**
+ * When OpenRouter routes through the user's own provider key (`is_byok`), the
+ * provider bills that account directly and `cost` is only OpenRouter's fee.
+ */
+function withByokUpstream(
+  fee: number | null,
+  record: Record<string, unknown> | null,
+): number | null {
+  if (record?.is_byok !== true) return fee;
+  const upstream =
+    asFiniteNumber(asRecord(record.cost_details)?.upstream_inference_cost) ??
+    asFiniteNumber(record.upstream_inference_cost);
+  return upstream === null ? fee : (fee ?? 0) + upstream;
+}
+
+/**
  * Pull cost / tokens / generation id from an OpenRouter or OpenAI JSON body
  * (Responses, Chat Completions, or a single SSE event).
  */
@@ -50,10 +65,12 @@ export function parseProviderUsage(data: unknown): ProviderUsage {
       ? root.generation_id.trim()
       : undefined);
 
-  const costUsd =
+  const costUsd = withByokUpstream(
     asFiniteNumber(usage?.cost) ??
-    asFiniteNumber(usage?.total_cost) ??
-    asFiniteNumber(root.total_cost);
+      asFiniteNumber(usage?.total_cost) ??
+      asFiniteNumber(root.total_cost),
+    usage,
+  );
 
   const inputTokens =
     asOptionalInt(usage?.input_tokens) ?? asOptionalInt(usage?.prompt_tokens);
@@ -85,10 +102,12 @@ function parseGenerationPayload(data: unknown): ProviderUsage {
   const inner = asRecord(root?.data) ?? root;
   if (!inner) return emptyUsage();
 
-  const costUsd =
+  const costUsd = withByokUpstream(
     asFiniteNumber(inner.total_cost) ??
-    asFiniteNumber(inner.usage) ??
-    asFiniteNumber(asRecord(inner.usage)?.cost);
+      asFiniteNumber(inner.usage) ??
+      asFiniteNumber(asRecord(inner.usage)?.cost),
+    inner,
+  );
 
   const generationId =
     typeof inner.id === 'string' && inner.id.trim() ? inner.id.trim() : undefined;

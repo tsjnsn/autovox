@@ -188,6 +188,7 @@ export async function planLesson(options: {
       options.outputLanguage,
     ),
     reasoningEffort: 'medium',
+    maxOutputTokens: 16_000,
     jsonSchema: {
       name: lessonSchema.name,
       schema: lessonSchema.schema as unknown as Record<string, unknown>,

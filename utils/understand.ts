@@ -110,6 +110,7 @@ export async function understandArticle(options: {
       options.outputLanguage,
     ),
     reasoningEffort: 'medium',
+    maxOutputTokens: 16_000,
     jsonSchema: {
       name: newsReportSchema.name,
       schema: newsReportSchema.schema as unknown as Record<string, unknown>,
