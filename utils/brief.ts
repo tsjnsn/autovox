@@ -26,6 +26,7 @@ import {
   reportManagedLifecycle,
   setManagedTabSession,
 } from './managed';
+import { languageFromDetection } from './languages';
 import { getSettings } from './storage';
 import type {
   BriefProgress,
@@ -82,6 +83,26 @@ async function extractFromTab(tabId: number): Promise<ExtractedArticle> {
     );
   }
   return response.article;
+}
+
+/**
+ * "Auto" becomes the page's detected language, so the writer, the drawer, and
+ * the narrator are all told the same language instead of each guessing.
+ * Stays "auto" (models infer it) when Chrome's detector is unsure.
+ */
+async function resolveOutputLanguage(
+  choice: OutputLanguage,
+  article: ExtractedArticle,
+): Promise<OutputLanguage> {
+  if (choice !== 'auto') return choice;
+  try {
+    const detected = await browser.i18n.detectLanguage(
+      `${article.title}\n${article.textContent}`.slice(0, 20_000),
+    );
+    return languageFromDetection(detected) ?? 'auto';
+  } catch {
+    return 'auto';
+  }
 }
 
 async function assertStillOnPage(
@@ -189,6 +210,8 @@ export async function runBriefPipeline(
     throw error;
   }
 
+  const outputLanguage = await resolveOutputLanguage(settings.outputLanguage, article);
+
   onProgress(
     chalkboard
       ? {
@@ -227,7 +250,7 @@ export async function runBriefPipeline(
         model: comprehensionModel,
         article,
         reportLength: settings.reportLength,
-        outputLanguage: settings.outputLanguage,
+        outputLanguage,
         signal,
       });
       lesson = planned.lesson;
@@ -242,7 +265,7 @@ export async function runBriefPipeline(
         model: comprehensionModel,
         article,
         reportLength: settings.reportLength,
-        outputLanguage: settings.outputLanguage,
+        outputLanguage,
         signal,
       });
       script = understood.script;
@@ -290,6 +313,7 @@ export async function runBriefPipeline(
       ? { lesson, drawings: lesson.scenes.map(() => null) }
       : {}),
     reportLength: settings.reportLength,
+    outputLanguage,
     moneySessionId: sessionId,
     managedSessionId,
   };
@@ -304,7 +328,7 @@ export async function runBriefPipeline(
         lesson,
         auth,
         model: drawingModel,
-        outputLanguage: settings.outputLanguage,
+        outputLanguage,
         signal,
       })
     : null;
