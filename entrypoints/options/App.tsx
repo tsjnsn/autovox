@@ -44,12 +44,11 @@ import {
   type ModelRole,
   type QualityLevel,
 } from '../../utils/models';
+import { OUTPUT_LANGUAGES, type OutputLanguage } from '../../utils/languages';
 import { getSettings, saveSettings } from '../../utils/storage';
 import {
   DEFAULT_SETTINGS,
-  OUTPUT_LANGUAGES,
   VOICES,
-  type OutputLanguage,
   type ReportLength,
   type Settings,
   type VoiceId,

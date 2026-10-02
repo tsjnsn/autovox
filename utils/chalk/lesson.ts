@@ -1,11 +1,10 @@
 import type { LlmAuth } from '../auth';
-import { getLanguageName } from '../languages';
+import { getLanguageName, type OutputLanguage } from '../languages';
 import { createStructuredResponse, type StreamProgress } from '../openai';
 import type { ProviderUsage } from '../usage';
 import type {
   ExtractedArticle,
   NewsReportScript,
-  OutputLanguage,
   ReportLength,
 } from '../types';
 import {

@@ -15,13 +15,6 @@ import type {
   SessionFormat,
 } from './chalk/types';
 
-export type { OutputLanguage };
-export {
-  coerceOutputLanguage,
-  DEFAULT_OUTPUT_LANGUAGE,
-  OUTPUT_LANGUAGES,
-} from './languages';
-
 export type ReportLength = 'short' | 'standard' | 'deep';
 export type ProviderMode = 'managed' | 'byok';
 

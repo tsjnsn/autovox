@@ -1,8 +1,7 @@
 import type { LlmAuth } from '../auth';
-import { getLanguageName } from '../languages';
+import { getLanguageName, type OutputLanguage } from '../languages';
 import { approxTokens, createStructuredResponse, type StreamProgress } from '../openai';
 import { emptyUsage, type ProviderUsage } from '../usage';
-import type { OutputLanguage } from '../types';
 import {
   BOARD_HEADING_BAND,
   BOARD_HEIGHT,

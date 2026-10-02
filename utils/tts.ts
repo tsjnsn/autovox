@@ -1,8 +1,8 @@
 import type { LlmAuth } from './auth';
-import { ttsLanguageInstruction } from './languages';
+import { ttsLanguageInstruction, type OutputLanguage } from './languages';
 import { streamAudioChatPcm } from './openai';
 import type { ProviderUsage } from './usage';
-import type { NewsReportScript, OutputLanguage, VoiceId } from './types';
+import type { NewsReportScript, VoiceId } from './types';
 import { scriptToSpokenText } from './understand';
 import { flattenBeats, type ChalkLesson } from './chalk/types';
 
