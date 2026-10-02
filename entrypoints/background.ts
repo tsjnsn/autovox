@@ -236,6 +236,7 @@ async function startBriefForTab(
       },
       controller.signal,
       format,
+      (draft) => notifyTab(tabId, { type: 'BRIEF_DRAFT', pageUrl, draft }),
     );
     const release = () => {
       if (abortByTab.get(tabId) === controller) {

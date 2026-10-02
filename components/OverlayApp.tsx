@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { BriefMeter } from './BriefMeter';
 import { Chalkboard } from './Chalkboard';
 import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
-import { PlayIcon } from './TransportIcons';
 import { samePageUrl } from '../utils/briefState';
 import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../utils/auth';
 import {
@@ -23,6 +23,7 @@ import type {
 } from '../utils/chalk/types';
 import type { ProviderUsage } from '../utils/usage';
 import type {
+  BriefDraft,
   BriefPhase,
   BriefProgress,
   BriefResult,
@@ -99,6 +100,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [phase, setPhase] = useState<BriefPhase>('idle');
   const [extracting, setExtracting] = useState(false);
+  const [sourceWords, setSourceWords] = useState<number | null>(null);
+  const [draft, setDraft] = useState<BriefDraft | null>(null);
   const [result, setResult] = useState<BriefResult | null>(null);
   const [error, setError] = useState('');
   const [streamKey, setStreamKey] = useState(0);
@@ -343,6 +346,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       setPhase('idle');
       setError('');
       setExtracting(false);
+      setSourceWords(null);
+      setDraft(null);
       setNarrating(false);
     };
 
@@ -369,6 +374,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       } else if (state.running) {
         setResult(null);
         setPhase(state.progress.phase);
+        setSourceWords(state.progress.sourceWords ?? null);
         setExtracting(true);
       } else {
         setResult(null);
@@ -391,6 +397,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         }
         setPhase(message.progress.phase);
         setError('');
+        setSourceWords(message.progress.sourceWords ?? null);
+        if (message.progress.phase === 'extracting') setDraft(null);
         if (
           message.progress.phase === 'extracting' ||
           message.progress.phase === 'understanding' ||
@@ -401,10 +409,18 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           setExtracting(false);
         }
       }
+      if (message.type === 'BRIEF_DRAFT') {
+        if (hasScriptRef.current || !samePageUrl(message.pageUrl, location.href)) {
+          return;
+        }
+        setDraft(message.draft);
+      }
       if (message.type === 'BRIEF_SCRIPT_READY') {
         if (!samePageUrl(message.result.source.url, location.href)) {
           return;
         }
+        setDraft(null);
+        setSourceWords(null);
         moneySessionRef.current = message.result.moneySessionId ?? null;
         managedRuntimeSessionRef.current = null;
         setManagedPlayerAuth(null);
@@ -430,6 +446,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         setPhase('error');
         setError(message.error);
         setExtracting(false);
+        setDraft(null);
         setNarrating(false);
       }
     };
@@ -487,6 +504,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     handleNarration(null);
     setResult(null);
     setNarrating(false);
+    setSourceWords(null);
+    setDraft(null);
     setExtracting(true);
     setPhase('extracting');
 
@@ -513,6 +532,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     setPhase('idle');
     setError('');
     setExtracting(false);
+    setSourceWords(null);
+    setDraft(null);
     setNarrating(false);
   };
 
@@ -608,48 +629,21 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
             <ScriptPreview script={result!.script} />
           </>
         ) : (
-          <div className="player">
-            <div className="player__bar">
-              <button
-                type="button"
-                className="player__icon-btn player__icon-btn--armed"
-                disabled={busy || hasAuth === false}
-                onClick={() => void startBrief(result?.format ?? 'brief')}
-                aria-label={
-                  result?.format === 'chalkboard'
-                    ? 'Chalkboard this page'
-                    : 'Brief this page'
-                }
-              >
-                <PlayIcon />
-              </button>
-              <div
-                className={`player__scrub${extracting ? ' player__scrub--loading' : ''}`}
-                role="progressbar"
-                aria-label="Brief progress"
-                aria-valuemin={0}
-                aria-valuemax={1}
-                aria-valuenow={extracting ? 0.4 : 0}
-              >
-                <div className="player__scrub-rail">
-                  <div
-                    className="player__scrub-buffered"
-                    style={{ width: extracting ? '40%' : '0%' }}
-                  />
-                  <div
-                    className="player__scrub-fill"
-                    style={{ width: extracting ? '40%' : '0%' }}
-                  />
-                </div>
-              </div>
-              <span
-                className={`player__label${error || hasAuth === false ? ' player__label--error' : ''}${!label ? ' player__label--empty' : ''}`}
-                title={error || undefined}
-              >
-                {label || '\u00a0'}
-              </span>
-            </div>
-          </div>
+          <BriefMeter
+            working={extracting}
+            label={label}
+            error={error}
+            labelIsError={Boolean(error) || hasAuth === false}
+            playDisabled={busy || hasAuth === false}
+            playLabel={
+              result?.format === 'chalkboard'
+                ? 'Chalkboard this page'
+                : 'Brief this page'
+            }
+            onPlay={() => void startBrief(result?.format ?? 'brief')}
+            sourceWords={sourceWords}
+            draft={draft}
+          />
         )}
 
         <div className="autovox-actions__meta">

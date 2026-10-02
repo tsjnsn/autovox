@@ -64,6 +64,7 @@ Avoid: pine/teal “trust” greens, Instrument/Fraunces editorial serif, soft m
 | 8 | Options / Clear as underlined mono meta only | Hierarchy |
 | 9 | Preferences (voice, length, key) only in Options | Scope |
 | 10 | `::selection` + sharp focus; custom scrub + volume thumbs | Craft |
+| 11 | **Wire tape** while writing: the script prints under the meter as the model writes it; the meter fills with words written | Media UX |
 
 ## Tokens
 
@@ -106,6 +107,19 @@ Options · Clear          (after script ready)
 
 No logo subtitle. No voice select. No separate Brief button. No Stop. No volume row: the speaker mutes, and its slider only opens on hover or focus, as on YouTube.
 
+While the script is written (brief or chalkboard), the row reads as a wire printer:
+
+```
+[▶] ======meter======........       214 words
+       …and the Moon line up, their pull adds█
+```
+
+- Reading: the tape says `Reading 9,958 words` in muted ink with a solid pilot light on the meter.
+- Writing: the spoken text (headline, lede, segments; or lesson title, scene headings, narration) prints on the tape, joined by ` — `, ending at a blinking vermillion cursor. The meter fills with words written against the top of the length target and never reaches the end; the label counts words.
+- The tape starts at the meter's left edge, types left to right like a carriage, then pins its newest text under the label and fades the oldest out at the start edge. RTL text mirrors it.
+- Only real signals: the article's word count, then the model's actual output. No fake percentages, no rotating "thinking" phrases.
+- The tape exists only while work is in flight. Once the script is ready, the player takes the row back and the tape is gone.
+
 ### Chalkboard session
 
 ```
@@ -133,8 +147,10 @@ Options · Export video · Clear     (Export video once the narration has fully 
 
 - No panel fade-up.
 - Loading: meter fill blink (steps), not spinner stacks.
+- One thing blinks at a time: the meter before anything is on the tape, then the tape cursor.
+- Wire tape types out each streamed burst over ~300ms so it keeps the model's pace without lagging behind it.
 - Scrub thumb/fill: zero lag.
-- `prefers-reduced-motion: reduce` kills blink.
+- `prefers-reduced-motion: reduce` kills blink and typing; the tape shows text as it arrives.
 
 ## Anti-slop + anti-dashboard gate
 
