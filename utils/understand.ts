@@ -1,6 +1,6 @@
 import type { LlmAuth } from './auth';
 import { comprehensionLanguageGuidance } from './languages';
-import { createStructuredResponse } from './openai';
+import { createStructuredResponse, type StreamProgress } from './openai';
 import type { ProviderUsage } from './usage';
 import type { ExtractedArticle, NewsReportScript, OutputLanguage, ReportLength } from './types';
 
@@ -98,6 +98,8 @@ export async function understandArticle(options: {
   article: ExtractedArticle;
   reportLength: ReportLength;
   outputLanguage: OutputLanguage;
+  /** Streams the response and reports the partial script as it arrives. */
+  onProgress?: (progress: StreamProgress) => void;
   signal?: AbortSignal;
 }): Promise<{ script: NewsReportScript; usage: ProviderUsage }> {
   const { text: content, usage } = await createStructuredResponse({
@@ -115,6 +117,7 @@ export async function understandArticle(options: {
       name: newsReportSchema.name,
       schema: newsReportSchema.schema as unknown as Record<string, unknown>,
     },
+    onProgress: options.onProgress,
     signal: options.signal,
   });
 

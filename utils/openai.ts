@@ -55,6 +55,8 @@ async function readErrorMessage(response: Response): Promise<string> {
 export interface StreamProgress {
   reasoningChars: number;
   outputChars: number;
+  /** Output text so far (partial JSON for structured calls). */
+  text: string;
   /** Time to the first reasoning or output delta. */
   firstTokenMs: number | null;
   elapsedMs: number;
@@ -76,6 +78,7 @@ async function readResponsesStream(
   const progress: StreamProgress = {
     reasoningChars: 0,
     outputChars: 0,
+    text: '',
     firstTokenMs: null,
     elapsedMs: 0,
   };
@@ -104,6 +107,7 @@ async function readResponsesStream(
       if (type === 'response.output_text.delta' && delta) {
         text += delta;
         progress.outputChars += delta.length;
+        progress.text = text;
       } else if (type.includes('reasoning') && type.endsWith('.delta') && delta) {
         progress.reasoningChars += delta.length;
       } else if (

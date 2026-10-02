@@ -1,6 +1,6 @@
 import type { LlmAuth } from '../auth';
 import { getLanguageName } from '../languages';
-import { createStructuredResponse } from '../openai';
+import { createStructuredResponse, type StreamProgress } from '../openai';
 import type { ProviderUsage } from '../usage';
 import type {
   ExtractedArticle,
@@ -176,6 +176,8 @@ export async function planLesson(options: {
   article: ExtractedArticle;
   reportLength: ReportLength;
   outputLanguage: OutputLanguage;
+  /** Streams the response and reports the partial lesson as it arrives. */
+  onProgress?: (progress: StreamProgress) => void;
   signal?: AbortSignal;
 }): Promise<{ lesson: ChalkLesson; usage: ProviderUsage }> {
   const { text: content, usage } = await createStructuredResponse({
@@ -193,6 +195,7 @@ export async function planLesson(options: {
       name: lessonSchema.name,
       schema: lessonSchema.schema as unknown as Record<string, unknown>,
     },
+    onProgress: options.onProgress,
     signal: options.signal,
   });
 

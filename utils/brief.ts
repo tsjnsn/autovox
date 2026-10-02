@@ -26,9 +26,18 @@ import {
   reportManagedLifecycle,
   setManagedTabSession,
 } from './managed';
+import {
+  BRIEF_DRAFT_KEYS,
+  countWords,
+  DRAFT_TARGET_WORDS,
+  draftText,
+  LESSON_DRAFT_KEYS,
+} from './draft';
 import { languageFromDetection } from './languages';
+import type { StreamProgress } from './openai';
 import { getSettings } from './storage';
 import type {
+  BriefDraft,
   BriefProgress,
   BriefResult,
   ExtractedArticle,
@@ -41,6 +50,9 @@ import { activeModels } from './models';
 import { UnderstandError, understandArticle } from './understand';
 
 type ProgressFn = (progress: BriefProgress) => void;
+
+/** Live drafts are throttled to keep tab messaging light. */
+const DRAFT_INTERVAL_MS = 120;
 
 async function pingContentScript(tabId: number): Promise<boolean> {
   try {
@@ -134,6 +146,7 @@ export async function runBriefPipeline(
   onProgress: ProgressFn,
   signal?: AbortSignal,
   format: SessionFormat = 'brief',
+  onDraft?: (draft: BriefDraft) => void,
 ): Promise<{ result: BriefResult; drawing: Promise<void> | null }> {
   const chalkboard = format === 'chalkboard';
   const expectedUrl = normalizePageUrl(pageUrl);
@@ -212,32 +225,54 @@ export async function runBriefPipeline(
 
   const outputLanguage = await resolveOutputLanguage(settings.outputLanguage, article);
 
+  const sourceWords = countWords(article.textContent);
   onProgress(
     chalkboard
       ? {
           phase: 'understanding',
           message: 'Understanding the lesson',
           detail: 'Working out what the tutorial teaches…',
+          sourceWords,
         }
       : {
           phase: 'understanding',
           message: 'Understanding the story',
           detail: 'Comprehending facts, context, and stakes…',
+          sourceWords,
         },
   );
-  onProgress(
-    chalkboard
-      ? {
-          phase: 'writing',
-          message: 'Planning the chalkboard',
-          detail: 'Scripting the lesson board by board…',
-        }
-      : {
-          phase: 'writing',
-          message: 'Writing news report',
-          detail: 'Rewriting into a broadcast-ready script…',
-        },
-  );
+
+  // Writing starts when the first spoken words stream in, not when the request does.
+  const draftKeys = chalkboard ? LESSON_DRAFT_KEYS : BRIEF_DRAFT_KEYS;
+  const targetWords = DRAFT_TARGET_WORDS[settings.reportLength];
+  let writing = false;
+  let lastDraftAt = 0;
+  const onStream = (progress: StreamProgress) => {
+    const now = Date.now();
+    if (!progress.text || now - lastDraftAt < DRAFT_INTERVAL_MS) return;
+    const text = draftText(progress.text, draftKeys);
+    if (!text) return;
+    lastDraftAt = now;
+    if (!writing) {
+      writing = true;
+      onProgress(
+        chalkboard
+          ? {
+              phase: 'writing',
+              message: 'Planning the chalkboard',
+              detail: 'Scripting the lesson board by board…',
+              sourceWords,
+            }
+          : {
+              phase: 'writing',
+              message: 'Writing news report',
+              detail: 'Rewriting into a broadcast-ready script…',
+              sourceWords,
+            },
+      );
+    }
+    onDraft?.({ text, words: countWords(text), targetWords });
+  };
 
   const { comprehension: comprehensionModel, drawing: drawingModel } =
     activeModels(settings);
@@ -251,6 +286,7 @@ export async function runBriefPipeline(
         article,
         reportLength: settings.reportLength,
         outputLanguage,
+        onProgress: onDraft ? onStream : undefined,
         signal,
       });
       lesson = planned.lesson;
@@ -266,6 +302,7 @@ export async function runBriefPipeline(
         article,
         reportLength: settings.reportLength,
         outputLanguage,
+        onProgress: onDraft ? onStream : undefined,
         signal,
       });
       script = understood.script;

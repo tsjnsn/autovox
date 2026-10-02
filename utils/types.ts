@@ -88,6 +88,17 @@ export interface BriefProgress {
   phase: BriefPhase;
   message: string;
   detail?: string;
+  /** Words in the extracted article, once extraction finishes. */
+  sourceWords?: number;
+}
+
+/** The script as the writing model streams it; sent to the overlay, never stored. */
+export interface BriefDraft {
+  /** Spoken text written so far, as one line. */
+  text: string;
+  words: number;
+  /** About how many words the finished script will have. */
+  targetWords: number;
 }
 
 /** Script + source only — audio is streamed live in the page overlay */
@@ -157,6 +168,8 @@ export type ExtensionMessage =
   | { type: 'BRIEF_RESET' }
   /** Targeted at the owning tab via tabs.sendMessage (not broadcast). */
   | { type: 'BRIEF_PROGRESS'; progress: BriefProgress }
+  /** Live draft of the script while it's being written (owning tab only). */
+  | { type: 'BRIEF_DRAFT'; pageUrl: string; draft: BriefDraft }
   | { type: 'BRIEF_SCRIPT_READY'; result: BriefResult }
   /** One chalkboard scene finished drawing (targeted at the owning tab). */
   | {

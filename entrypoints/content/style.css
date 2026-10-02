@@ -376,6 +376,67 @@
   opacity: 0;
 }
 
+/*
+ * Wire tape: while the script is written it prints under the meter, starting
+ * at the meter's left edge (play button + gap) so it reads as part of the
+ * instrument. Newest text sits at the end; older text runs off the start.
+ */
+.wire {
+  display: flex;
+  justify-content: flex-end;
+  overflow: hidden;
+  margin-inline-start: 40px;
+  height: 16px;
+  font-family: var(--av-font-mono);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--av-ink);
+  white-space: nowrap;
+}
+
+/* Once a line fills, the oldest text fades out at the start edge. */
+.wire--full {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 3em);
+  mask-image: linear-gradient(to right, transparent, #000 3em);
+}
+
+.wire--full:dir(rtl) {
+  -webkit-mask-image: linear-gradient(to left, transparent, #000 3em);
+  mask-image: linear-gradient(to left, transparent, #000 3em);
+}
+
+.wire--status {
+  color: var(--av-muted);
+}
+
+/* Full width types from the start like a carriage; longer text pins its end. */
+.wire__text {
+  flex: 0 0 auto;
+  min-width: 100%;
+}
+
+.wire__cursor {
+  display: inline-block;
+  width: 0.6em;
+  height: 12px;
+  margin-inline-start: 2px;
+  vertical-align: -2px;
+  background: var(--av-accent);
+  animation: autovox-cursor-blink 1s steps(1, end) infinite;
+}
+
+@keyframes autovox-cursor-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wire__cursor {
+    animation: none;
+  }
+}
+
 /* YouTube-style: speaker toggles mute; the slider opens beside it on hover or focus. */
 .player__volume {
   flex: 0 0 auto;
