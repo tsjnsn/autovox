@@ -286,7 +286,9 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     [lesson],
   );
   const teacherInstructions =
-    lesson && settings ? buildTeacherInstructions(settings.outputLanguage) : undefined;
+    lesson && settings
+      ? buildTeacherInstructions(result?.outputLanguage ?? settings.outputLanguage)
+      : undefined;
 
   const handleNarration = useCallback((pcm: Uint8Array | null) => {
     exportAbortRef.current?.abort();
@@ -591,7 +593,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
               auth={playerAuth!}
               model={activeModels(settings!).tts}
               voice={settings!.voice}
-              outputLanguage={settings!.outputLanguage}
+              outputLanguage={result!.outputLanguage ?? settings!.outputLanguage}
               autoPlay
               onPlaying={handlePlaying}
               onDone={handleDone}

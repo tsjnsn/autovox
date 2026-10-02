@@ -106,6 +106,8 @@ export interface BriefResult {
   drawings?: (ChalkSceneDrawing | null)[];
   /** Immutable pricing dimension for managed replay. */
   reportLength?: ReportLength;
+  /** The script's language ("auto" resolved from the page when detectable); narration reads in it. */
+  outputLanguage?: OutputLanguage;
   /** Local spend session — no page content is attached to the ledger. */
   moneySessionId?: string;
   /** Server-side funded session. The short-lived key is never persisted here. */

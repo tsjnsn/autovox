@@ -204,6 +204,38 @@ export function coerceOutputLanguage(value: unknown): OutputLanguage {
   return DEFAULT_OUTPUT_LANGUAGE;
 }
 
+/** Chrome's detector (CLD) reports a few legacy or macrolanguage codes. */
+const DETECTED_ALIASES: Record<string, OutputLanguage> = {
+  iw: 'he',
+  in: 'id',
+  nb: 'no',
+  nn: 'no',
+  fil: 'tl',
+};
+
+/** Shape of `browser.i18n.detectLanguage` results. */
+export interface DetectedLanguages {
+  isReliable: boolean;
+  languages: { language: string; percentage: number }[];
+}
+
+/**
+ * The page's dominant language as an output language, or null when the
+ * detector is unsure or the language can't be narrated.
+ */
+export function languageFromDetection(
+  result: DetectedLanguages | null | undefined,
+): Exclude<OutputLanguage, 'auto'> | null {
+  if (!result?.isReliable) return null;
+  const top = [...result.languages].sort((a, b) => b.percentage - a.percentage)[0];
+  if (!top) return null;
+  const primary = top.language.toLowerCase().split(/[-_]/)[0] ?? '';
+  const code = DETECTED_ALIASES[primary] ?? primary;
+  return code !== 'auto' && LANGUAGE_CODES.has(code)
+    ? (code as Exclude<OutputLanguage, 'auto'>)
+    : null;
+}
+
 export function getLanguageName(code: OutputLanguage): string | null {
   if (code === 'auto') return null;
   return LANGUAGE_NAMES[code];
