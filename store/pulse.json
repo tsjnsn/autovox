@@ -1,25 +1,25 @@
 {
-  "fetchedAt": "2026-10-01T06:50:40.955Z",
+  "fetchedAt": "2026-10-02T06:49:02.548Z",
   "extensionId": "aodlbiejdiibbpemagfngbdhaappejda",
   "name": "Autovox",
   "listingUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda",
   "reviewsUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda/reviews",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "userCount": null,
   "rating": null,
   "reviewCount": null,
   "size": "2.07MiB",
-  "updatedAt": "2026-09-30T18:03:17.000Z",
+  "updatedAt": "2026-10-02T04:53:52.000Z",
   "category": "productivity/communication",
   "storeGaMeasurementId": "G-WCK20EPPMX",
   "privacyPolicyUrl": "https://raw.githubusercontent.com/tsjnsn/autovox/refs/heads/main/PRIVACY.md",
   "reviews": [],
   "previous": {
-    "fetchedAt": "2026-09-28T07:02:06.503Z",
+    "fetchedAt": "2026-10-01T06:50:40.955Z",
     "userCount": null,
     "rating": null,
     "reviewCount": null,
-    "version": "0.3.0"
+    "version": "0.4.0"
   },
   "deltas": {
     "userCount": null,
