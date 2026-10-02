@@ -1,8 +1,8 @@
 import type { LlmAuth } from './auth';
-import { comprehensionLanguageGuidance } from './languages';
+import { comprehensionLanguageGuidance, type OutputLanguage } from './languages';
 import { createStructuredResponse, type StreamProgress } from './openai';
 import type { ProviderUsage } from './usage';
-import type { ExtractedArticle, NewsReportScript, OutputLanguage, ReportLength } from './types';
+import type { ExtractedArticle, NewsReportScript, ReportLength } from './types';
 
 export class UnderstandError extends Error {
   readonly usage: ProviderUsage;

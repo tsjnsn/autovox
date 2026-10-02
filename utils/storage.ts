@@ -1,5 +1,5 @@
+import { coerceOutputLanguage } from './languages';
 import {
-  coerceOutputLanguage,
   coerceVoice,
   DEFAULT_SETTINGS,
   type ProviderMode,

@@ -33,7 +33,7 @@ import {
   draftText,
   LESSON_DRAFT_KEYS,
 } from './draft';
-import { languageFromDetection } from './languages';
+import { languageFromDetection, type OutputLanguage } from './languages';
 import type { StreamProgress } from './openai';
 import { getSettings } from './storage';
 import type {
@@ -44,7 +44,6 @@ import type {
   ExtensionMessage,
   ManagedLifecycleEvent,
   NewsReportScript,
-  OutputLanguage,
 } from './types';
 import { activeModels } from './models';
 import { UnderstandError, understandArticle } from './understand';

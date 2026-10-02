@@ -1,6 +1,7 @@
 import type { LlmAuth } from './auth';
+import type { OutputLanguage } from './languages';
 import type { ProviderUsage } from './usage';
-import type { OutputLanguage, ReportLength, VoiceId } from './types';
+import type { ReportLength, VoiceId } from './types';
 
 export const MONEY_LEDGER_KEY = 'autovoxMoneyLedger';
 export const MONEY_LEDGER_VERSION = 1;

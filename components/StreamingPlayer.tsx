@@ -15,8 +15,9 @@ import {
 import { prefetchInOrder } from '../utils/prefetch';
 import { buildTtsChunks, streamSegmentPcm } from '../utils/tts';
 import type { ChalkTimeline } from '../utils/chalk/types';
+import type { OutputLanguage } from '../utils/languages';
 import type { ProviderUsage } from '../utils/usage';
-import type { NewsReportScript, OutputLanguage, VoiceId } from '../utils/types';
+import type { NewsReportScript, VoiceId } from '../utils/types';
 import { MutedIcon, PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
 
 interface StreamingPlayerProps {
