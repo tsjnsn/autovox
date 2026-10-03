@@ -2,11 +2,20 @@ import './style.css';
 import './chalkboard.css';
 import ReactDOM from 'react-dom/client';
 import { OverlayApp } from '../../components/OverlayApp';
+import { OverlayBoundary } from '../../components/OverlayBoundary';
 import { watchCommittedUrl } from '../../utils/committedUrl';
+import { errorResponse } from '../../utils/errors';
 import { extractArticleFromDocument } from '../../utils/extract';
 import { enableShadowCopy } from '../../utils/shadowCopy';
 import { keepOnTop } from '../../utils/topLayer';
 import type { ExtensionMessage } from '../../utils/types';
+
+/**
+ * Covers the shadow root's CSS, React's first commit, a storage read and one
+ * round trip to the already-awake background. That normally takes well under
+ * a second; the slack absorbs a page whose main thread is busy for a while.
+ */
+const READY_TIMEOUT_MS = 10_000;
 
 export default defineContentScript({
   matches: ['<all_urls>'],
@@ -18,16 +27,27 @@ export default defineContentScript({
     /** Set while the overlay is open or opening; settles once it is listening. */
     let ready: Promise<void> | null = null;
     let abandonReady: ((reason: Error) => void) | null = null;
+    /** The overlay crashed; it stays up showing Fault until closed or reopened. */
+    let crashed = false;
 
-    const removeUi = () => {
-      abandonReady?.(new Error('Overlay closed before it was ready'));
+    const teardown = (reason: Error) => {
+      abandonReady?.(reason);
       abandonReady = null;
       ready = null;
+      crashed = false;
       ui?.remove();
       ui = null;
     };
 
-    const openUi = async (onReady: () => void, isCurrent: () => boolean) => {
+    const removeUi = () => {
+      teardown(new Error('Overlay closed before it was ready'));
+    };
+
+    const openUi = async (
+      onReady: () => void,
+      onCrash: (error: unknown) => void,
+      isCurrent: () => boolean,
+    ) => {
       const created = await createShadowRootUi(ctx, {
         name: 'autovox-overlay',
         position: 'inline',
@@ -44,7 +64,11 @@ export default defineContentScript({
           host.append(app);
 
           const root = ReactDOM.createRoot(app);
-          root.render(<OverlayApp onClose={removeUi} onReady={onReady} />);
+          root.render(
+            <OverlayBoundary onClose={removeUi} onCrash={onCrash}>
+              <OverlayApp onClose={removeUi} onReady={onReady} />
+            </OverlayBoundary>,
+          );
           return {
             root,
             releaseTop: keepOnTop(shadowHost),
@@ -64,18 +88,41 @@ export default defineContentScript({
     };
 
     const mountUi = (): Promise<void> => {
-      if (ready) return ready;
+      if (ready && !crashed) return ready;
+      if (crashed) removeUi();
       const opening: Promise<void> = new Promise<void>((resolve, reject) => {
+        const isCurrent = () => ready === opening;
         abandonReady = reject;
-        void openUi(resolve, () => ready === opening).catch(
-          (error: unknown) => {
-            if (ready === opening) {
-              ready = null;
-              abandonReady = null;
-            }
-            reject(error);
-          },
-        );
+        const timer = setTimeout(() => {
+          if (isCurrent()) {
+            teardown(new Error('Overlay did not become ready in time'));
+          }
+        }, READY_TIMEOUT_MS);
+        const onReady = () => {
+          clearTimeout(timer);
+          resolve();
+        };
+        const onCrash = (error: unknown) => {
+          clearTimeout(timer);
+          if (!isCurrent()) return;
+          crashed = true;
+          abandonReady = null;
+          reject(
+            new Error(
+              error instanceof Error
+                ? `Overlay crashed: ${error.message}`
+                : 'Overlay crashed',
+            ),
+          );
+        };
+        void openUi(onReady, onCrash, isCurrent).catch((error: unknown) => {
+          clearTimeout(timer);
+          if (isCurrent()) {
+            ready = null;
+            abandonReady = null;
+          }
+          reject(error);
+        });
       });
       ready = opening;
       return opening;
@@ -115,13 +162,7 @@ export default defineContentScript({
         void toggleUi()
           .then((state) => sendResponse({ ok: true, ...state }))
           .catch((error: unknown) => {
-            sendResponse({
-              ok: false,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Failed to toggle overlay',
-            });
+            sendResponse(errorResponse(error, 'Failed to toggle overlay'));
           });
         return true;
       }
@@ -130,13 +171,7 @@ export default defineContentScript({
         void mountUi()
           .then(() => sendResponse({ ok: true, open: true }))
           .catch((error: unknown) => {
-            sendResponse({
-              ok: false,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : 'Failed to open overlay',
-            });
+            sendResponse(errorResponse(error, 'Failed to open overlay'));
           });
         return true;
       }
