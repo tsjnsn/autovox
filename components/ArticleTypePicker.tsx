@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import {
   ARTICLE_TYPE_CHOICES,
   ARTICLE_TYPE_SPECS,
@@ -62,9 +62,7 @@ export function ArticleTypePicker({
       : null;
   const offerRebrief = choiceChangesType(choice, current);
 
-  useEffect(() => {
-    if (disabled) setOpen(false);
-  }, [disabled]);
+  if (disabled && open) setOpen(false);
 
   const close = () => {
     setOpen(false);

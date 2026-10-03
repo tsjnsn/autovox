@@ -1,4 +1,5 @@
 import convexPlugin from "@convex-dev/eslint-plugin";
+import reactHooks from "eslint-plugin-react-hooks";
 import tseslint from "typescript-eslint";
 
 export default tseslint.config(
@@ -27,6 +28,11 @@ export default tseslint.config(
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/no-floating-promises": "error",
     },
+  },
+  {
+    // React runs only in the extension; convex-test fixtures also use `use*` names.
+    files: ["{components,entrypoints,utils}/**/*.{ts,tsx}"],
+    ...reactHooks.configs.flat.recommended,
   },
   ...convexPlugin.configs.recommended,
   {

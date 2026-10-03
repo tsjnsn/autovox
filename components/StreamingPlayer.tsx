@@ -1,6 +1,8 @@
 import {
   useCallback,
   useEffect,
+  useEffectEvent,
+  useLayoutEffect,
   useRef,
   useState,
   type MutableRefObject,
@@ -31,7 +33,6 @@ interface StreamingPlayerProps {
   model: string;
   voice: VoiceId;
   outputLanguage: OutputLanguage;
-  autoPlay?: boolean;
   onPlaying?: () => void;
   onDone?: (playbackSeconds: number) => void;
   onError?: (
@@ -80,7 +81,6 @@ export function StreamingPlayer({
   model,
   voice,
   outputLanguage,
-  autoPlay = true,
   onPlaying,
   onDone,
   onError,
@@ -118,14 +118,7 @@ export function StreamingPlayer({
   const onAbortRef = useRef(onAbort);
   const onUsageRef = useRef(onUsage);
   const onChunkTimelineRef = useRef(onChunkTimeline);
-  onChunkTimelineRef.current = onChunkTimeline;
   const onNarrationRef = useRef(onNarration);
-  onNarrationRef.current = onNarration;
-  onPlayingRef.current = onPlaying;
-  onDoneRef.current = onDone;
-  onErrorRef.current = onError;
-  onAbortRef.current = onAbort;
-  onUsageRef.current = onUsage;
 
   const scriptKey = `${script.headline}\n${script.lede}\n${script.segments.join('\n')}\n${chunks?.join('\n') ?? ''}`;
   const authKey = authCacheKey(auth);
@@ -137,14 +130,6 @@ export function StreamingPlayer({
   const chunksRef = useRef(chunks);
   const ttsInstructionsRef = useRef(ttsInstructions);
   const prefetchRef = useRef(prefetch);
-  chunksRef.current = chunks;
-  ttsInstructionsRef.current = ttsInstructions;
-  prefetchRef.current = prefetch;
-  scriptRef.current = script;
-  authRef.current = auth;
-  modelRef.current = model;
-  voiceRef.current = voice;
-  outputLanguageRef.current = outputLanguage;
 
   const estimatedSeconds = Math.max(1, script.estimatedSeconds || 120);
 
@@ -160,9 +145,28 @@ export function StreamingPlayer({
   const [position, setPosition] = useState(0);
 
   const positionRef = useRef(0);
-  durationRef.current = duration;
-  bufferedSecondsRef.current = bufferedSeconds;
-  positionRef.current = position;
+
+  // Before any effect, so effects and the callbacks they start see this render.
+  useLayoutEffect(() => {
+    onChunkTimelineRef.current = onChunkTimeline;
+    onNarrationRef.current = onNarration;
+    onPlayingRef.current = onPlaying;
+    onDoneRef.current = onDone;
+    onErrorRef.current = onError;
+    onAbortRef.current = onAbort;
+    onUsageRef.current = onUsage;
+    chunksRef.current = chunks;
+    ttsInstructionsRef.current = ttsInstructions;
+    prefetchRef.current = prefetch;
+    scriptRef.current = script;
+    authRef.current = auth;
+    modelRef.current = model;
+    voiceRef.current = voice;
+    outputLanguageRef.current = outputLanguage;
+    durationRef.current = duration;
+    bufferedSecondsRef.current = bufferedSeconds;
+    positionRef.current = position;
+  });
 
   useEffect(() => {
     if (!clockRef) return;
@@ -493,22 +497,20 @@ export function StreamingPlayer({
     updateBufferFromBytes,
   ]);
 
+  const restartStream = useEffectEvent(() => {
+    void startStream();
+  });
+
   // New script / model / voice / key → fresh stream (invalidates cache)
   useEffect(() => {
-    if (autoPlay) {
-      void startStream();
-    } else {
-      clearCache();
-      playerRef.current?.resetPlayback();
-      setTransportPhase('ready');
-    }
+    restartStream();
 
     return () => {
       abortRef.current?.abort();
       runIdRef.current += 1;
       streamingRef.current = false;
     };
-  }, [scriptKey, authKey, model, voice, outputLanguage, ttsInstructions, autoPlay]);
+  }, [scriptKey, authKey, model, voice, outputLanguage, ttsInstructions]);
 
   const toggle = async () => {
     const player = playerRef.current;

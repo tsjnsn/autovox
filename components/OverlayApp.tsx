@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { ArticleTypePicker } from './ArticleTypePicker';
 import { BriefMeter } from './BriefMeter';
 import { Chalkboard } from './Chalkboard';
@@ -128,25 +136,34 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const getBoardTime = useCallback(() => clockRef.current?.() ?? 0, []);
 
   const hasScriptRef = useRef(false);
-  hasScriptRef.current = Boolean(result);
   const moneySessionRef = useRef<string | null>(null);
   const settingsRef = useRef<Settings | null>(null);
   const faultRef = useRef<BriefFault | null>(null);
   const managedRuntimeSessionRef = useRef<string | null>(null);
-  settingsRef.current = settings;
-  faultRef.current = fault;
+  useLayoutEffect(() => {
+    hasScriptRef.current = Boolean(result);
+    settingsRef.current = settings;
+    faultRef.current = fault;
+  });
 
   useEffect(() => {
     moneySessionRef.current = result?.moneySessionId ?? null;
   }, [result?.moneySessionId]);
+
+  /** Every result change already clears managed auth; settings changes go through here. */
+  const applySettings = useCallback((next: Settings) => {
+    setSettings(next);
+    if (next.providerMode !== 'managed') {
+      managedRuntimeSessionRef.current = null;
+      setManagedPlayerAuth(null);
+    }
+  }, []);
 
   useEffect(() => {
     if (
       !result?.managedSessionId ||
       settings?.providerMode !== 'managed'
     ) {
-      managedRuntimeSessionRef.current = null;
-      setManagedPlayerAuth(null);
       return;
     }
 
@@ -321,6 +338,8 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
 
   useEffect(() => () => exportAbortRef.current?.abort(), []);
 
+  const signalReady = useEffectEvent(() => onReady?.());
+
   const exportVideo = async () => {
     if (exportAbortRef.current) {
       exportAbortRef.current.abort();
@@ -374,7 +393,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
 
     const loadBriefState = async () => {
       const loaded = await getSettings();
-      setSettings(loaded);
+      applySettings(loaded);
 
       const state = (await browser.runtime.sendMessage({
         type: 'GET_BRIEF_STATE',
@@ -478,7 +497,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
       if (area !== 'local') return;
       if (!changes.autovoxSettings) return;
       void getSettings().then((loaded) => {
-        setSettings(loaded);
+        applySettings(loaded);
         if (hasLlmAuth(loaded) && faultRef.current?.kind === 'setup') {
           setFault(null);
           setPhase((prev) => (prev === 'error' ? 'idle' : prev));
@@ -489,12 +508,12 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     browser.runtime.onMessage.addListener(onMessage);
     browser.storage.onChanged.addListener(onStorageChanged);
     // After the initial load, so its stale state can't overwrite the first BRIEF_PROGRESS.
-    void loadBriefState().finally(() => onReady?.());
+    void loadBriefState().finally(() => signalReady());
     return () => {
       browser.runtime.onMessage.removeListener(onMessage);
       browser.storage.onChanged.removeListener(onStorageChanged);
     };
-  }, []);
+  }, [applySettings]);
 
   const openOptions = () => {
     void browser.runtime.sendMessage({ type: 'OPEN_OPTIONS' });
@@ -502,7 +521,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
 
   const startBrief = async (format: SessionFormat = 'brief') => {
     const latest = await getSettings();
-    setSettings(latest);
+    applySettings(latest);
     if (!hasLlmAuth(latest)) {
       setFault({
         message: 'Connect with OpenRouter or add an OpenAI API key in Options first.',
@@ -644,7 +663,6 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
               model={activeModels(settings!).tts}
               voice={settings!.voice}
               outputLanguage={result!.outputLanguage ?? settings!.outputLanguage}
-              autoPlay
               onPlaying={handlePlaying}
               onDone={handleDone}
               onError={handleError}

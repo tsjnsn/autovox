@@ -1,6 +1,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type Dispatch,
@@ -80,6 +81,16 @@ async function requestManagedAccount(
   })) as ManagedAccountResponse;
 }
 
+async function loadManagedAccount(
+  ensure: boolean,
+): Promise<ManagedAccountResponse> {
+  const response = await requestManagedAccount(ensure);
+  if (!response.ok && response.code === 'account_not_initialized' && !ensure) {
+    return await requestManagedAccount(true);
+  }
+  return response;
+}
+
 async function requestManagedCheckout(): Promise<{ ok: true } | ErrorResponse> {
   return (await browser.runtime.sendMessage({
     type: 'START_MANAGED_CHECKOUT',
@@ -99,34 +110,36 @@ function ManagedPanel({
   );
   const [failure, setFailure] = useState<ManagedFailure | null>(null);
   const [busy, setBusy] = useState(false);
+  const [signedInBefore, setSignedInBefore] = useState(isSignedIn);
 
-  const refresh = useCallback(async (ensure = false) => {
+  if (isSignedIn !== signedInBefore) {
+    setSignedInBefore(isSignedIn);
     if (!isSignedIn) {
       setAccount(null);
       setFailure(null);
-      return;
     }
-    let response = await requestManagedAccount(ensure);
-    if (!response.ok && response.code === 'account_not_initialized' && !ensure) {
-      response = await requestManagedAccount(true);
-    }
+  }
+
+  const applyAccount = useCallback((response: ManagedAccountResponse) => {
     if (response.ok) {
       setAccount(response.status);
       setFailure(null);
     } else {
       setFailure(response);
     }
-  }, [isSignedIn]);
+  }, []);
 
   useEffect(() => {
-    void refresh(true);
-  }, [refresh]);
+    if (isSignedIn) void loadManagedAccount(true).then(applyAccount);
+  }, [isSignedIn, applyAccount]);
 
   useEffect(() => {
-    const onFocus = () => void refresh();
+    const onFocus = () => {
+      if (isSignedIn) void loadManagedAccount(false).then(applyAccount);
+    };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [refresh]);
+  }, [isSignedIn, applyAccount]);
 
   const startCheckout = async () => {
     setBusy(true);
@@ -249,12 +262,25 @@ function useModelCatalog(auth: LlmAuth | null) {
   const [now, setNow] = useState(() => Date.now());
   const catalogRef = useRef<ModelCatalog | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  catalogRef.current = catalog;
 
   const authMode = auth?.mode ?? null;
   const authKey = auth ? `${auth.mode}:${auth.apiKey}` : '';
   const authRef = useRef(auth);
-  authRef.current = auth;
+  const [catalogAuthKey, setCatalogAuthKey] = useState(authKey);
+
+  if (authKey !== catalogAuthKey) {
+    setCatalogAuthKey(authKey);
+    setCatalog((existing) =>
+      existing && existing.source === authMode ? existing : null,
+    );
+    setError('');
+    if (!authKey) setLoading(false);
+  }
+
+  useLayoutEffect(() => {
+    catalogRef.current = catalog;
+    authRef.current = auth;
+  });
 
   const refresh = useCallback(async () => {
     const current = authRef.current;
@@ -292,13 +318,8 @@ function useModelCatalog(auth: LlmAuth | null) {
   }, [authMode]);
 
   useEffect(() => {
-    setCatalog((existing) =>
-      existing && existing.source === authMode ? existing : null,
-    );
-    setError('');
     if (!authKey) {
       abortRef.current?.abort();
-      setLoading(false);
       return;
     }
     const timer = window.setTimeout(
@@ -729,6 +750,12 @@ export default function App() {
   const connected = Boolean(settings.openRouterApiKey.trim());
   const managedAvailable = isManagedConfigured();
 
+  const flash = useCallback((message: string) => {
+    setStatus(message);
+    window.clearTimeout(flashTimerRef.current);
+    flashTimerRef.current = window.setTimeout(() => setStatus(''), 2500);
+  }, []);
+
   useEffect(() => {
     void getSettings().then((stored) => {
       setSettings(stored);
@@ -749,7 +776,7 @@ export default function App() {
       void saveSettings(settings).then(() => flash('Saved'));
     }, AUTOSAVE_DELAY_MS);
     return () => window.clearTimeout(timer);
-  }, [settings, loaded]);
+  }, [settings, loaded, flash]);
 
   useEffect(() => {
     const flush = () => {
@@ -784,12 +811,6 @@ export default function App() {
     browser.storage.onChanged.addListener(onChanged);
     return () => browser.storage.onChanged.removeListener(onChanged);
   }, []);
-
-  const flash = (message: string) => {
-    setStatus(message);
-    window.clearTimeout(flashTimerRef.current);
-    flashTimerRef.current = window.setTimeout(() => setStatus(''), 2500);
-  };
 
   /** Saves immediately with its own message instead of the autosave's. */
   const commit = async (next: Settings, message: string) => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, type JSX } from 'react';
+import { useEffect, useEffectEvent, useRef, type JSX } from 'react';
 import { BoardRenderer, type BoardProps } from '../utils/chalk/renderer';
 
 export type ChalkboardProps = BoardProps;
@@ -12,8 +12,7 @@ const REDUCED_MOTION_QUERY = '(prefers-reduced-motion: reduce)';
 export function Chalkboard(props: ChalkboardProps): JSX.Element {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const propsRef = useRef(props);
-  propsRef.current = props;
+  const latestProps = useEffectEvent(() => props);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -40,7 +39,7 @@ export function Chalkboard(props: ChalkboardProps): JSX.Element {
     let warned = false;
     const tick = () => {
       try {
-        renderer.render(propsRef.current);
+        renderer.render(latestProps());
       } catch (err) {
         if (!warned) {
           warned = true;
