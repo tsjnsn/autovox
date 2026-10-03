@@ -167,8 +167,9 @@ export async function runBriefPipeline(
   const managed = settings.providerMode === 'managed';
   let auth: LlmAuth | null = managed ? null : resolveLlmAuth(settings);
   let managedSessionId: string | undefined;
+  const kind = chalkboard ? 'chalkboard' : 'brief';
   const sessionId = await startMoneySession({
-    kind: 'brief',
+    kind,
     reportLength: settings.reportLength,
     voice: settings.voice,
     outputLanguage: settings.outputLanguage,
@@ -179,7 +180,7 @@ export async function runBriefPipeline(
   if (managed) {
     try {
       const funded = await openManagedSession({
-        kind: 'brief',
+        kind,
         reportLength: settings.reportLength,
         voice: settings.voice,
         outputLanguage: settings.outputLanguage,

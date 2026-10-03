@@ -10,7 +10,7 @@ const STALE_OPEN_MS = 60 * 60 * 1000;
 
 export type MoneyOutcome = 'open' | 'completed' | 'fault' | 'aborted';
 export type MoneyFaultStage = 'extract' | 'understand' | 'tts' | 'none';
-export type MoneyEventKind = 'brief' | 'tts_replay';
+export type MoneyEventKind = 'brief' | 'chalkboard' | 'tts_replay';
 export type MoneyAuthMode = LlmAuth['mode'] | 'managed';
 
 export type MoneyLineItem = {
@@ -48,6 +48,7 @@ export type MoneySessionDims = {
 export type MoneySummary = {
   eventCount: number;
   briefCount: number;
+  chalkboardCount: number;
   completedCount: number;
   faultCount: number;
   abortedCount: number;
@@ -58,7 +59,8 @@ export type MoneySummary = {
   last7dUsd: number;
   costKnownCount: number;
   costUnknownCount: number;
-  averageCompletedUsd: number | null;
+  /** Completed briefs with a known cost; chalkboards and replays cost differently. */
+  averageBriefUsd: number | null;
 };
 
 type Ledger = {
@@ -103,7 +105,9 @@ function isFaultStage(value: unknown): value is MoneyFaultStage {
 }
 
 function isEventKind(value: unknown): value is MoneyEventKind {
-  return value === 'brief' || value === 'tts_replay';
+  return (
+    value === 'brief' || value === 'chalkboard' || value === 'tts_replay'
+  );
 }
 
 function isLineItem(value: unknown): value is MoneyLineItem {
@@ -311,6 +315,7 @@ export function summarizeMoneyEvents(
 ): MoneySummary {
   const weekAgo = now - 7 * 24 * 60 * 60 * 1000;
   let briefCount = 0;
+  let chalkboardCount = 0;
   let completedCount = 0;
   let faultCount = 0;
   let abortedCount = 0;
@@ -318,13 +323,15 @@ export function summarizeMoneyEvents(
   let totalUsd = 0;
   let wastedUsd = 0;
   let completedUsd = 0;
-  let completedKnown = 0;
+  let completedBriefUsd = 0;
+  let completedBriefKnown = 0;
   let last7dUsd = 0;
   let costKnownCount = 0;
   let costUnknownCount = 0;
 
   for (const event of events) {
     if (event.kind === 'brief') briefCount += 1;
+    if (event.kind === 'chalkboard') chalkboardCount += 1;
     if (event.outcome === 'completed') completedCount += 1;
     if (event.outcome === 'fault') faultCount += 1;
     if (event.outcome === 'aborted') abortedCount += 1;
@@ -337,7 +344,10 @@ export function summarizeMoneyEvents(
       if (event.outcome === 'fault') wastedUsd += event.costUsd;
       if (event.outcome === 'completed') {
         completedUsd += event.costUsd;
-        completedKnown += 1;
+        if (event.kind === 'brief') {
+          completedBriefUsd += event.costUsd;
+          completedBriefKnown += 1;
+        }
       }
     } else {
       costUnknownCount += 1;
@@ -347,6 +357,7 @@ export function summarizeMoneyEvents(
   return {
     eventCount: events.length,
     briefCount,
+    chalkboardCount,
     completedCount,
     faultCount,
     abortedCount,
@@ -357,8 +368,8 @@ export function summarizeMoneyEvents(
     last7dUsd,
     costKnownCount,
     costUnknownCount,
-    averageCompletedUsd:
-      completedKnown > 0 ? completedUsd / completedKnown : null,
+    averageBriefUsd:
+      completedBriefKnown > 0 ? completedBriefUsd / completedBriefKnown : null,
   };
 }
 

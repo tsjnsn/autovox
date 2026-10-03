@@ -72,7 +72,7 @@ export async function createManagedCheckout(): Promise<string> {
 }
 
 export async function openManagedSession(options: {
-  kind: "brief" | "tts_replay";
+  kind: "brief" | "chalkboard" | "tts_replay";
   reportLength: ReportLength;
   voice: VoiceId;
   outputLanguage: OutputLanguage;

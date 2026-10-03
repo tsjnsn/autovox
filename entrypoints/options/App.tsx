@@ -648,19 +648,28 @@ function ModelsPanel({
   );
 }
 
+function countOf(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? '' : 's'}`;
+}
+
+function spendHero(spend: MoneySummary): string {
+  const sessions = [
+    spend.briefCount > 0 ? countOf(spend.briefCount, 'brief') : null,
+    spend.chalkboardCount > 0
+      ? countOf(spend.chalkboardCount, 'chalkboard')
+      : null,
+  ].filter((part) => part !== null);
+  if (sessions.length === 0) return 'No briefs yet.';
+  return `${formatUsd(spend.totalUsd)} across ${sessions.join(' and ')}`;
+}
+
 function SpendPanel({ spend }: { spend: MoneySummary | null }) {
   return (
     <section className="spend" aria-labelledby="spend-title">
       <h2 id="spend-title" className="spend__title">
         Spend
       </h2>
-      <p className="spend__hero">
-        {!spend
-          ? '—'
-          : spend.briefCount === 0
-            ? 'No briefs yet.'
-            : `${formatUsd(spend.totalUsd)} across ${spend.briefCount} brief${spend.briefCount === 1 ? '' : 's'}`}
-      </p>
+      <p className="spend__hero">{spend ? spendHero(spend) : '—'}</p>
       <dl className="spend__meter">
         <div>
           <dt>Last 7 days</dt>
@@ -669,13 +678,13 @@ function SpendPanel({ spend }: { spend: MoneySummary | null }) {
         <div>
           <dt>Average brief</dt>
           <dd>
-            {spend?.averageCompletedUsd != null
-              ? formatUsd(spend.averageCompletedUsd)
+            {spend?.averageBriefUsd != null
+              ? formatUsd(spend.averageBriefUsd)
               : '—'}
           </dd>
         </div>
         <div>
-          <dt>Spent on failed briefs</dt>
+          <dt>Spent on failures</dt>
           <dd>{spend ? formatUsd(spend.wastedUsd) : '—'}</dd>
         </div>
       </dl>
