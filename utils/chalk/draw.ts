@@ -1,4 +1,5 @@
 import type { LlmAuth } from '../auth';
+import { ARTICLE_TYPE_SPECS, type ArticleType } from '../comprehension';
 import { getLanguageName, type OutputLanguage } from '../languages';
 import { approxTokens, createStructuredResponse, type StreamProgress } from '../openai';
 import { emptyUsage, type ProviderUsage } from '../usage';
@@ -116,7 +117,7 @@ const drawingSchema = {
   },
 } as const;
 
-const SYSTEM_PROMPT = `You are a chalkboard illustrator working beside a teacher who is narrating a lesson live. You draw ONE board (a scene) as a list of simple chalk elements that appear beat by beat, in sync with the narration, so the board is always a coherent backdrop to what is being said.
+const DRAWING_RULES = `You draw ONE board (a scene) as a list of simple chalk elements that appear beat by beat, in sync with the narration, so the board is always a coherent backdrop to what is being said.
 
 BOARD
 - 1000 wide × 600 tall. Origin top-left, x grows right, y grows DOWN.
@@ -152,6 +153,12 @@ Every element lists every field; set fields that do not apply to its kind to nul
 - path: points = flattened coordinates [x0, y0, x1, y1, …] of a polyline (2–60 points); closed = true to join the last point back to the first. Sharp turns stay sharp corners (stairs, triangles, zigzags, bar outlines) and gentle bends are smoothed, so give curves and waves many closely spaced points (about every 30 units).
 - check / cross: x, y = center, size = width (~40).
 - pose, face, accessory, say are only for figure; points and closed only for path; curve only for arrow.`;
+
+/** Boards drawn before article types existed keep the explainer's teacher. */
+function systemPrompt(articleType: ArticleType | undefined): string {
+  const { presenter } = ARTICLE_TYPE_SPECS[articleType ?? 'explainer'];
+  return `You are a chalkboard illustrator working beside ${presenter} live. ${DRAWING_RULES}`;
+}
 
 function languageGuidance(code: OutputLanguage): string {
   const name = getLanguageName(code);
@@ -215,6 +222,7 @@ export function drawSceneRequest(
   lesson: ChalkLesson,
   sceneIndex: number,
   outputLanguage: OutputLanguage,
+  articleType?: ArticleType,
 ): {
   system: string;
   user: string;
@@ -225,7 +233,7 @@ export function drawSceneRequest(
     throw new RangeError(`No scene at index ${sceneIndex}`);
   }
   return {
-    system: SYSTEM_PROMPT,
+    system: systemPrompt(articleType),
     user: buildUserPrompt(lesson, scene, sceneIndex, outputLanguage),
     jsonSchema: {
       name: drawingSchema.name,
@@ -240,6 +248,8 @@ export async function drawScene(options: {
   lesson: ChalkLesson;
   sceneIndex: number;
   outputLanguage: OutputLanguage;
+  /** Frames who the boards are drawn for; omitted keeps the explainer's teacher. */
+  articleType?: ArticleType;
   /** Reports streamed token progress as it arrives. */
   onProgress?: (progress: StreamProgress) => void;
   signal?: AbortSignal;
@@ -271,7 +281,12 @@ export async function drawScene(options: {
     result = await createStructuredResponse({
       auth: options.auth,
       model: options.model,
-      ...drawSceneRequest(options.lesson, options.sceneIndex, options.outputLanguage),
+      ...drawSceneRequest(
+        options.lesson,
+        options.sceneIndex,
+        options.outputLanguage,
+        options.articleType,
+      ),
       reasoningEffort: 'low',
       maxOutputTokens: DRAW_MAX_OUTPUT_TOKENS,
       hostSort: 'throughput',
@@ -610,6 +625,7 @@ export async function drawLessonScenes(options: {
   model: string;
   lesson: ChalkLesson;
   outputLanguage: OutputLanguage;
+  articleType?: ArticleType;
   signal?: AbortSignal;
   concurrency?: number;
   onScene: (
@@ -653,6 +669,7 @@ export async function drawLessonScenes(options: {
           lesson: options.lesson,
           sceneIndex,
           outputLanguage: options.outputLanguage,
+          articleType: options.articleType,
           onProgress: options.onProgress
             ? (progress) => options.onProgress?.(sceneIndex, tries + 1, progress)
             : undefined,

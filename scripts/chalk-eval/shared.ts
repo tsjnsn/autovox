@@ -1,4 +1,5 @@
 import type { ChalkLesson, ChalkSceneDrawing } from '../../utils/chalk/types';
+import type { ArticleTypeChoice, ResolvedArticleType } from '../../utils/comprehension';
 import type { ReportLength } from '../../utils/types';
 import type { ProviderUsage } from '../../utils/usage';
 import type { LessonMetrics, SceneMetrics } from './metrics';
@@ -19,7 +20,15 @@ export interface WritingRun {
   ms: number;
   spend: Spend;
   lesson?: ChalkLesson;
+  /** Absent in runs recorded before article types. */
+  articleType?: ResolvedArticleType;
   metrics?: LessonMetrics;
+}
+
+export interface ReferenceLesson {
+  source: string;
+  lesson: ChalkLesson;
+  articleType?: ResolvedArticleType;
 }
 
 /** What one drawing attempt streamed before it finished, failed, or timed out. */
@@ -90,8 +99,10 @@ export interface EvalResults {
   /** `path` is the captured page file, so a later judge-only run can reread it. */
   page: { title: string; url: string; chars: number; path?: string };
   reportLength: ReportLength;
+  /** The writers' article type choice; absent (as infer) in runs recorded before article types. */
+  articleTypeChoice?: ArticleTypeChoice;
   writing: WritingRun[];
-  reference: { source: string; lesson: ChalkLesson } | null;
+  reference: ReferenceLesson | null;
   drawing: DrawingRun[];
   judging?: Judging;
   /**

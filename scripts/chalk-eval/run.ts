@@ -14,6 +14,10 @@
  *       (re-renders that run's drawings with today's renderer; the judge scores them beside its saved boards)
  *   pnpm eval:chalk --page .eval/pages/tutorial-git-rebase.json
  *       (pages are ExtractedArticle JSON; keep a mix of news, tutorials and other languages)
+ *   pnpm eval:chalk --page tests/fixtures/articles/opinion.json --article-type opinion
+ *       (writers infer the article type unless told one; the judge scores plans against the
+ *       forced or majority type's arc and boards against the reference's type, and runs from
+ *       before article types against the explainer rubric unless --article-type is given)
  *
  * The judge scores everything twice by default, in fresh random orders, to average out its noise.
  */
@@ -26,11 +30,17 @@ import type { LlmAuth } from '../../utils/auth';
 import { drawLessonScenes, drawScene, dropRepeats } from '../../utils/chalk/draw';
 import { planLesson } from '../../utils/chalk/lesson';
 import type { ChalkLesson } from '../../utils/chalk/types';
+import {
+  ARTICLE_TYPE_CHOICES,
+  type ArticleType,
+  type ArticleTypeChoice,
+} from '../../utils/comprehension';
 import type { ExtractedArticle, ReportLength } from '../../utils/types';
 import type { ProviderUsage } from '../../utils/usage';
 import { boardKey, exportBoardImages, judgeEval } from './judge';
 import { parseOpenRouterModels } from '../../utils/models';
 import { lessonMetrics, sceneMetrics } from './metrics';
+import { drawingRubricType } from './rubric';
 import {
   addUsage,
   DRAW_CRITERIA,
@@ -44,6 +54,7 @@ import {
   type AttemptStream,
   type DrawingRun,
   type EvalResults,
+  type ReferenceLesson,
   type SceneRun,
   type Spend,
   type WritingRun,
@@ -85,16 +96,18 @@ async function runWriting(
   model: string,
   rep: number,
   reportLength: ReportLength,
+  articleTypeChoice: ArticleTypeChoice,
 ): Promise<WritingRun> {
   const spend = emptySpend();
   const start = performance.now();
   try {
-    const { lesson, usage } = await planLesson({
+    const { lesson, usage, articleType } = await planLesson({
       auth,
       model,
       article,
       reportLength,
       outputLanguage: 'auto',
+      articleType: articleTypeChoice,
       signal: AbortSignal.timeout(WRITE_TIMEOUT_MS),
     });
     addUsage(spend, usage);
@@ -105,6 +118,7 @@ async function runWriting(
       ms: performance.now() - start,
       spend,
       lesson,
+      articleType,
       metrics: lessonMetrics(lesson),
     };
   } catch (error) {
@@ -119,6 +133,7 @@ async function runDrawing(
   lesson: ChalkLesson,
   model: string,
   rep: number,
+  articleType: ArticleType | undefined,
 ): Promise<DrawingRun> {
   const spend = emptySpend();
   const scenes: SceneRun[] = lesson.scenes.map((_, index) => ({
@@ -147,6 +162,7 @@ async function runDrawing(
       model,
       lesson,
       outputLanguage: 'auto',
+      articleType,
       onUsage: (usage) => addUsage(spend, usage),
       onScene: (index, drawing) => {
         const scene = scenes[index]!;
@@ -268,12 +284,19 @@ async function runWriters(
     for (const model of writers) {
       const rep = nextRep(results.writing, model);
       process.stdout.write(`write  ${model} (rep ${rep})… `);
-      const writeRun = await runWriting(auth, article, model, rep, results.reportLength);
+      const writeRun = await runWriting(
+        auth,
+        article,
+        model,
+        rep,
+        results.reportLength,
+        results.articleTypeChoice ?? 'infer',
+      );
       results.writing.push(writeRun);
       save();
       console.log(
         writeRun.ok
-          ? `${(writeRun.ms / 1000).toFixed(1)}s ${usd(writeRun.spend.costUsd)} · ${writeRun.metrics!.scenes} scenes, ${writeRun.metrics!.words} words`
+          ? `${(writeRun.ms / 1000).toFixed(1)}s ${usd(writeRun.spend.costUsd)} · ${writeRun.metrics!.scenes} scenes, ${writeRun.metrics!.words} words · ${writeRun.articleType!.type} (${writeRun.articleType!.source})`
           : `FAILED ${writeRun.error}`,
       );
     }
@@ -293,12 +316,15 @@ async function runDrawers(
     console.log('No reference lesson; skipping drawing. Pass --plan-file or include a writer.');
     return;
   }
-  console.log(`Drawing the lesson from ${reference.source}: ${reference.lesson.scenes.length} scenes.`);
+  const articleType = drawingRubricType(results);
+  console.log(
+    `Drawing the lesson from ${reference.source}: ${reference.lesson.scenes.length} scenes, as ${articleType ?? 'an untyped (explainer) lesson'}.`,
+  );
   for (let round = 0; round < reps; round++) {
     for (const model of drawers) {
       const rep = nextRep(results.drawing, model);
       process.stdout.write(`draw   ${model} (rep ${rep})… `);
-      const drawRun = await runDrawing(auth, reference.lesson, model, rep);
+      const drawRun = await runDrawing(auth, reference.lesson, model, rep, articleType);
       results.drawing.push(drawRun);
       save();
       const drawn = drawRun.scenes.filter((scene) => scene.ok).length;
@@ -319,7 +345,7 @@ function list(value: string | undefined, fallback: string[]): string[] {
     .filter(Boolean);
 }
 
-function loadReference(path: string): { source: string; lesson: ChalkLesson } {
+function loadReference(path: string): ReferenceLesson {
   const data = JSON.parse(readFileSync(resolve(ROOT, path), 'utf8')) as
     | EvalResults
     | ChalkLesson;
@@ -524,6 +550,7 @@ async function main(): Promise<void> {
       'skip-writing': { type: 'boolean', default: false },
       reps: { type: 'string', default: '1' },
       length: { type: 'string', default: 'standard' },
+      'article-type': { type: 'string' },
       out: { type: 'string' },
       judge: { type: 'string', default: DEFAULT_JUDGE },
       'judge-passes': { type: 'string', default: '2' },
@@ -546,6 +573,12 @@ async function main(): Promise<void> {
     console.log(`Viewer: ${await renderViewer(dir, results)}`);
     return;
   }
+
+  const articleTypeFlag = values['article-type'];
+  if (articleTypeFlag !== undefined && !ARTICLE_TYPE_CHOICES.includes(articleTypeFlag as ArticleTypeChoice)) {
+    throw new Error(`--article-type must be one of ${ARTICLE_TYPE_CHOICES.join(', ')}`);
+  }
+  const articleTypeChoice = articleTypeFlag as ArticleTypeChoice | undefined;
 
   const auth = loadAuth();
   const judgeModel = values.judge === 'none' ? null : values.judge;
@@ -570,6 +603,7 @@ async function main(): Promise<void> {
   if (values['judge-only']) {
     outDir = resolve(ROOT, values['judge-only']);
     results = JSON.parse(readFileSync(resolve(outDir, 'results.json'), 'utf8')) as EvalResults;
+    if (articleTypeChoice) results.articleTypeChoice = articleTypeChoice;
     refreshDrawings(results);
     const pagePath = results.page.path ? resolve(ROOT, results.page.path) : null;
     article =
@@ -589,6 +623,7 @@ async function main(): Promise<void> {
     // A fresh timestamp gives the viewer a fresh blind order and rankings.
     results.createdAt = new Date().toISOString();
     delete results.judging;
+    if (articleTypeChoice) results.articleTypeChoice = articleTypeChoice;
     const save = saver(outDir, results);
     save();
     console.log(`Extending ${relative(ROOT, source)} into ${relative(ROOT, outDir)}.`);
@@ -614,6 +649,7 @@ async function main(): Promise<void> {
         path: relative(ROOT, pagePath),
       },
       reportLength,
+      articleTypeChoice: articleTypeChoice ?? 'infer',
       writing: [],
       reference: null,
       drawing: [],
@@ -630,7 +666,11 @@ async function main(): Promise<void> {
         results.writing.find((w) => w.ok && w.model === planFrom) ??
         results.writing.find((w) => w.ok);
       if (source?.lesson) {
-        results.reference = { source: `${source.model} (rep ${source.rep})`, lesson: source.lesson };
+        results.reference = {
+          source: `${source.model} (rep ${source.rep})`,
+          lesson: source.lesson,
+          articleType: source.articleType,
+        };
       }
     }
     save();

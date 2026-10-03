@@ -16,6 +16,7 @@ import { LessonError, lessonToScript, planLesson } from './chalk/lesson';
 import type { ChalkLesson, SessionFormat } from './chalk/types';
 import {
   coerceArticleTypeChoice,
+  type ArticleType,
   type ArticleTypeChoice,
   type ResolvedArticleType,
 } from './comprehension';
@@ -247,8 +248,8 @@ export async function runBriefPipeline(
     chalkboard
       ? {
           phase: 'understanding',
-          message: 'Understanding the lesson',
-          detail: 'Working out what the tutorial teaches…',
+          message: 'Understanding the page',
+          detail: 'Working out what to put on the boards…',
           sourceWords,
         }
       : {
@@ -277,7 +278,7 @@ export async function runBriefPipeline(
           ? {
               phase: 'writing',
               message: 'Planning the chalkboard',
-              detail: 'Scripting the lesson board by board…',
+              detail: 'Scripting it board by board…',
               sourceWords,
             }
           : {
@@ -393,6 +394,7 @@ export async function runBriefPipeline(
         auth,
         model: drawingModel,
         outputLanguage,
+        articleType: articleType.type,
         signal,
       })
     : null;
@@ -427,6 +429,7 @@ async function drawLessonForTab(options: {
   auth: LlmAuth;
   model: string;
   outputLanguage: OutputLanguage;
+  articleType: ArticleType;
   signal?: AbortSignal;
 }): Promise<void> {
   const { tabId, pageUrl, sessionId, model, signal } = options;
@@ -436,6 +439,7 @@ async function drawLessonForTab(options: {
       model,
       lesson: options.lesson,
       outputLanguage: options.outputLanguage,
+      articleType: options.articleType,
       signal,
       onUsage: (usage) =>
         addMoneyLine(sessionId, usageToLineItem('draw', model, usage)),

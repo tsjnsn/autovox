@@ -47,6 +47,8 @@ export interface ArticleTypeSpec {
   arc: string;
   /** What a chalkboard's boards show. */
   board: string;
+  /** Who the chalkboard illustrator works beside, as in "working beside … live". */
+  presenter: string;
   /** Voice-model persona and pacing. */
   narrator: { role: string; delivery: string };
 }
@@ -59,6 +61,7 @@ export const ARTICLE_TYPE_SPECS: Record<ArticleType, ArticleTypeSpec> = {
     arc: 'Inverted pyramid in a neutral anchor voice: cold open on what happened, then who, when, and where, context, developments, why it matters, and what happens next. Attribute claims to their sources.',
     board:
       'A news board: the event and who is involved, a timeline, before and after, key numbers. Cast the real parties by role. The last board is what happens next.',
+    presenter: 'a narrator who is reporting this news story',
     narrator: {
       role: 'a calm, clear broadcast news anchor',
       delivery: 'steady pacing and a professional news tone',
@@ -71,6 +74,7 @@ export const ARTICLE_TYPE_SPECS: Record<ArticleType, ArticleTypeSpec> = {
     arc: 'Storytelling voice: open on a scene or a person, bring in the people and what is at stake, follow the arc through its turn to where things stand, and close on a telling detail or quote.',
     board:
       'A storyboard: each board is one scene from the story, in story order, with the real people as the cast.',
+    presenter: 'a narrator who is telling this story',
     narrator: {
       role: 'a warm, engaging storyteller',
       delivery: 'an unhurried storytelling pace that lets scenes and quotes land',
@@ -83,6 +87,7 @@ export const ARTICLE_TYPE_SPECS: Record<ArticleType, ArticleTypeSpec> = {
     arc: 'Teach it like a gifted teacher: hook with the question the piece answers and say what we will learn, give the key idea in plain words, build how it works step by step with the example or analogy the piece offers, flag common misconceptions, then close with a short recap.',
     board:
       'Build the concept board by board with visual metaphors, a misconception board with check and cross, and a recap board.',
+    presenter: 'a teacher who is narrating a lesson',
     narrator: {
       role: 'a warm, clear teacher',
       delivery: 'an engaged, unhurried teaching pace with natural emphasis on key terms',
@@ -95,6 +100,7 @@ export const ARTICLE_TYPE_SPECS: Record<ArticleType, ArticleTypeSpec> = {
     arc: 'Attribute throughout: this is the author\'s view, not settled fact ("the author argues", "in her view"). Lay out the thesis, each main argument with the evidence offered for it, the counterpoints the author raises or rebuts, and the conclusion. Stay neutral; never adopt, judge, or extend the argument.',
     board:
       "Claim, evidence, rebuttal: the author's thesis on the first board, each argument as a pillar holding it up, the objection beside the author's reply, then the conclusion. Cast the author and the sides they argue about.",
+    presenter: 'a narrator who is walking through this argument',
     narrator: {
       role: 'a measured, even-handed commentator',
       delivery: 'a calm, neutral tone that presents the argument without endorsing it',
@@ -107,6 +113,7 @@ export const ARTICLE_TYPE_SPECS: Record<ArticleType, ArticleTypeSpec> = {
     arc: "Coach the listener through it: what they'll get done and what they need first, then the steps in order with commands, settings, or quantities named exactly, the pitfalls, and how to tell it worked. Name code; don't read it out.",
     board:
       "One numbered board per step or small group of steps, with pitfalls as don'ts (cross) beside the dos (check), ending on a checklist of the steps.",
+    presenter: 'a narrator who is walking through these steps',
     narrator: {
       role: 'a patient, clear instructor',
       delivery: 'a steady pace with a short pause between steps',
@@ -119,6 +126,7 @@ export const ARTICLE_TYPE_SPECS: Record<ArticleType, ArticleTypeSpec> = {
     arc: 'Lead with the finding in plain words, then who did it and how (method, sample, data), the caveats and limits (early results, correlation versus cause, sample size), and why it matters. Never claim more than the evidence supports.',
     board:
       'The question, the setup (who or what was studied and how), the result as a simple chart or before and after, a caveats board, then why it matters.',
+    presenter: 'a narrator who is presenting this research',
     narrator: {
       role: 'a curious, precise science correspondent',
       delivery: 'a clear, measured pace that keeps numbers and caveats distinct',
@@ -131,6 +139,7 @@ export const ARTICLE_TYPE_SPECS: Record<ArticleType, ArticleTypeSpec> = {
     arc: 'Say who they are and why they are worth hearing, then the key themes, each anchored by their own words as attributed quotes, and close on a memorable line of theirs. Keep the questions only where the answers need them.',
     board:
       'The subject is the star: who they are first, then one board per theme with them saying a short line in a speech bubble, ending on their closing thought.',
+    presenter: 'a narrator who is presenting this interview',
     narrator: {
       role: 'a thoughtful radio host presenting an interview',
       delivery: 'a conversational pace that lets quoted lines sound like the speaker',

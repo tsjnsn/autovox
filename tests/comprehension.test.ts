@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { creditsForSession, type SessionKind } from "../convex/lib/economics";
 import type { LlmAuth } from "../utils/auth";
+import { drawSceneRequest } from "../utils/chalk/draw";
 import { planLesson } from "../utils/chalk/lesson";
-import type { SessionFormat } from "../utils/chalk/types";
+import type { ChalkLesson, SessionFormat } from "../utils/chalk/types";
 import {
   ARTICLE_TYPES,
   ARTICLE_TYPE_SPECS,
@@ -525,6 +527,39 @@ void test("the re-brief cost label follows the server's credit rule", () => {
   }
   assert.equal(rebriefCreditsLabel("brief", "standard"), "1 credit");
   assert.equal(rebriefCreditsLabel("chalkboard", "deep"), "2 credits");
+});
+
+/** SHA-256 of the eval-tuned illustrator prompt as of 8fef67c. */
+const EXPLAINER_DRAW_PROMPT_SHA256 =
+  "820d2e33da1938475f4676433e75e4231f16a50c62505b0199c777f3902c2c4d";
+const DRAW_FRAMING = /^(You are a chalkboard illustrator [^.]*\.) /;
+
+function drawSystem(type?: ArticleType): string {
+  return drawSceneRequest(LESSON as ChalkLesson, 0, "auto", type).system;
+}
+
+void test("explainer boards keep the eval-tuned illustrator prompt byte for byte", () => {
+  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+  assert.equal(sha(drawSystem("explainer")), EXPLAINER_DRAW_PROMPT_SHA256);
+  assert.equal(drawSystem(), drawSystem("explainer"));
+  assert.match(
+    drawSystem("explainer"),
+    /^You are a chalkboard illustrator working beside a teacher who is narrating a lesson live\. /,
+  );
+});
+
+void test("other types change only the illustrator's framing sentence", () => {
+  const explainer = drawSystem("explainer");
+  const rules = explainer.replace(DRAW_FRAMING, "");
+  for (const type of ARTICLE_TYPES) {
+    if (type === "explainer") continue;
+    const prompt = drawSystem(type);
+    const framing = DRAW_FRAMING.exec(prompt)?.[1] ?? "";
+    assert.ok(framing.includes(ARTICLE_TYPE_SPECS[type].presenter), type);
+    assert.doesNotMatch(framing, LESSON_WORDS, type);
+    assert.doesNotMatch(framing, /teacher/i, type);
+    assert.equal(prompt.replace(DRAW_FRAMING, ""), rules, type);
+  }
 });
 
 void test("a re-brief is offered only when the type could change", () => {
