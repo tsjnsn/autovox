@@ -1,4 +1,9 @@
 import type { LlmAuth } from './auth';
+import type {
+  ArticleType,
+  ArticleTypeSource,
+  ResolvedArticleType,
+} from './comprehension';
 import type { OutputLanguage } from './languages';
 import type { ProviderUsage } from './usage';
 import type { ReportLength, VoiceId } from './types';
@@ -35,6 +40,9 @@ export type MoneyEvent = {
   voice: VoiceId;
   outputLanguage: OutputLanguage;
   authMode: MoneyAuthMode;
+  /** The brief's article type and how it was settled; set once the script is written. */
+  articleType?: ArticleType;
+  articleTypeSource?: ArticleTypeSource;
 };
 
 export type MoneySessionDims = {
@@ -291,6 +299,18 @@ export async function addMoneyLine(
     if (!event) return;
     event.lineItems.push(item);
     applyTotals(event);
+  });
+}
+
+export async function setMoneyArticleType(
+  id: string,
+  resolved: ResolvedArticleType,
+): Promise<void> {
+  await withLedger((ledger) => {
+    const event = ledger.events.find((row) => row.id === id);
+    if (!event) return;
+    event.articleType = resolved.type;
+    event.articleTypeSource = resolved.source;
   });
 }
 

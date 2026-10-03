@@ -1,0 +1,13 @@
+{
+  "title": "How to rotate your SSH keys without locking yourself out",
+  "byline": null,
+  "excerpt": "Add the new key first, test it, then remove the old one.",
+  "siteName": "Example Docs",
+  "url": "https://docs.example.dev/guides/how-to-rotate-ssh-keys",
+  "textContent": "Rotating SSH keys is routine maintenance, but doing the steps in the wrong order can lock you out of a server. This guide takes about ten minutes. You need shell access to the server with your current key.\n\nStep 1: Generate a new key on your laptop. Run ssh-keygen -t ed25519 -C \"laptop-2026\" and accept the default file location. Set a passphrase.\n\nStep 2: Add the new public key to the server. Run ssh-copy-id -i ~/.ssh/id_ed25519.pub user@server. This appends the key to ~/.ssh/authorized_keys without removing the old one.\n\nStep 3: Test the new key in a second terminal before you change anything else. Run ssh -i ~/.ssh/id_ed25519 user@server. Keep your original session open until this works.\n\nStep 4: Remove the old key. On the server, open ~/.ssh/authorized_keys and delete the line that ends with your old key's comment. Save the file.\n\nStep 5: Confirm the old key is rejected. From your laptop, run ssh -i ~/.ssh/id_rsa user@server. It should fail with \"Permission denied (publickey).\"\n\nCommon mistakes: deleting the old key before testing the new one, and editing authorized_keys with a tool that changes its permissions. The file should stay at mode 600.\n\nYou're done when the new key logs in and the old key is refused.",
+  "length": 1232,
+  "signals": {
+    "schemaTypes": ["HowTo", "TechArticle"],
+    "sections": []
+  }
+}

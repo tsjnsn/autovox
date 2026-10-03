@@ -101,8 +101,9 @@ AUTOVOX                           Close
 source…                (after script ready)
 Show script
 
-Options · Chalkboard     (idle / brief)
-Options · Clear          (after script ready)
+Options · Chalkboard          Infer ▾          (idle / brief)
+Options · Chalkboard · Clear                    (after script ready; the
+                         Infer · News ▾          type readout drops to its own line)
 ```
 
 No logo subtitle. No voice select. No separate Brief button. No Stop. No volume row: the speaker mutes, and its slider only opens on hover or focus, as on YouTube.
@@ -141,7 +142,8 @@ AUTOVOX                                         Close
 source…
 Show script
 
-Options · Export video · Clear     (Export video once the narration has fully downloaded)
+Options · Export video · Clear             Infer · Explainer ▾
+                                   (Export video once the narration has fully downloaded)
 ```
 
 - The board is a display on the same instrument, not a second mode: one transport row still drives it, and the chassis only widens.
@@ -149,6 +151,24 @@ Options · Export video · Clear     (Export video once the narration has fully 
 - The board is never blank or stale: the heading is written first, beat notes stand in until a scene's art arrives, then the art catches up in about a second.
 - **Chalkboard** is a quiet meta link (like Options), never a second primary button. Play still means go.
 - **Export video** is meta too: the link itself shows progress ("Exporting 42%"), clicking it again cancels, and a failure reads "Export failed" in danger ink with the reason on hover. No modal, no second progress bar.
+
+### Article type
+
+```
+Options · Chalkboard · Clear
+                       Opinion ▴
+────────────────────────────────
+ARTICLE TYPE
+[Infer] [News] [Feature] [Explainer]
+[■Opinion■] [How-to] [Research] [Interview]
+Re-brief as Opinion · 1 credit
+```
+
+- The article type (news, feature, explainer, opinion, how-to, research, interview) shapes how the page is told and boarded. The default lives in Options; the overlay can override it for the page in view, like Chalkboard.
+- It is a readout at the right end of the meta row, never a select in the faceplate. With no separator before it, it can drop to its own line in the narrow card without leaving a stray dot.
+- Once a brief exists, Infer shows what it settled on (`Infer · News`, with "Infer ·" muted). Hover says how it was settled.
+- Clicking opens an in-flow chooser under the meta row: owned chips over hidden native radios. The pick is filled with ink, and the brief on screen gets a dashed border.
+- Changing the pick never spends anything by itself. If a brief is on screen and the pick could change it, the chooser offers one explicit link, `Re-brief as X` or `Redraw as X`, with the credit cost in managed mode. Otherwise the pick applies to the next brief.
 
 ## Motion
 

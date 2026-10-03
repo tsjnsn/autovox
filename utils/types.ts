@@ -14,6 +14,12 @@ import type {
   ChalkSceneDrawing,
   SessionFormat,
 } from './chalk/types';
+import {
+  DEFAULT_ARTICLE_TYPE_CHOICE,
+  type ArticleTypeChoice,
+  type PageSignals,
+  type ResolvedArticleType,
+} from './comprehension';
 import type { BriefErrorKind } from './errors';
 
 export type ReportLength = 'short' | 'standard' | 'deep';
@@ -44,6 +50,8 @@ export interface Settings {
   reportLength: ReportLength;
   /** Target language for the news report and narration. */
   outputLanguage: OutputLanguage;
+  /** Default article type; the overlay can override it for one page. */
+  articleType: ArticleTypeChoice;
   /** BYOK comprehension model id (managed listening ignores it). */
   comprehensionModel: string;
   /** BYOK chalkboard drawing model id; empty uses the comprehension model. */
@@ -60,6 +68,8 @@ export interface ExtractedArticle {
   url: string;
   textContent: string;
   length: number;
+  /** Page metadata used as article-type hints; absent outside the content script. */
+  signals?: PageSignals;
 }
 
 export interface NewsReportScript {
@@ -109,6 +119,8 @@ export interface BriefResult {
   lesson?: ChalkLesson;
   /** Chalkboard only, by scene; null until that scene's drawing arrives. */
   drawings?: (ChalkSceneDrawing | null)[];
+  /** Absent on briefs saved before article types existed. */
+  articleType?: ResolvedArticleType;
   /** Immutable pricing dimension for managed replay. */
   reportLength?: ReportLength;
   /** The script's language ("auto" resolved from the page when detectable); narration reads in it. */
@@ -153,7 +165,13 @@ export type ExtensionMessage =
       sessionId: string;
       event: ManagedLifecycleEvent;
     }
-  | { type: 'START_BRIEF'; tabId?: number; format?: SessionFormat }
+  | {
+      type: 'START_BRIEF';
+      tabId?: number;
+      format?: SessionFormat;
+      /** Overlay pick for this page; omitted uses the Options default. */
+      articleType?: ArticleTypeChoice;
+    }
   /** Brief state for the sender's tab + page URL only. */
   | { type: 'GET_BRIEF_STATE' }
   /** Clears brief state for the sender's tab only. */
@@ -197,6 +215,7 @@ export const DEFAULT_SETTINGS: Settings = {
   voice: 'sage',
   reportLength: 'standard',
   outputLanguage: DEFAULT_OUTPUT_LANGUAGE,
+  articleType: DEFAULT_ARTICLE_TYPE_CHOICE,
   comprehensionModel: DEFAULT_COMPREHENSION_MODEL,
   drawingModel: DEFAULT_DRAWING_MODEL,
   ttsModel: DEFAULT_TTS_MODEL,

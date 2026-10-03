@@ -1,0 +1,13 @@
+{
+  "title": "Sleep spindles predict next-day word recall in adults over 65",
+  "byline": "A. Osei, L. Marchetti, K. Tanaka",
+  "excerpt": "In 212 older adults, denser sleep spindles were linked to better recall of word pairs the next morning.",
+  "siteName": "arXiv",
+  "url": "https://arxiv.org/abs/2609.01234",
+  "textContent": "Abstract. Sleep spindles, brief bursts of brain activity during light sleep, are thought to help move new memories into long-term storage. We asked whether spindle density predicts next-day memory in older adults.\n\nMethods. We recorded overnight EEG in 212 adults aged 65 to 84 in their own homes using a headband device. Each evening, participants learned 60 word pairs. The next morning, we tested recall of the second word when shown the first.\n\nResults. Participants with higher spindle density recalled more word pairs. Each additional spindle per minute was associated with 2.1 more correctly recalled pairs (95% confidence interval 1.2 to 3.0), after adjusting for age, total sleep time, and education. The association was strongest in the first half of the night.\n\nLimitations. This is an observational study, so it cannot show that spindles cause better recall. The headband measured fewer channels than a sleep lab would. Participants were mostly healthy and well educated, which may limit how far the results generalize.\n\nConclusion. Spindle density is a promising, low-cost marker of overnight memory in older adults. Trials that boost spindles with timed sounds are needed to test whether the link is causal.",
+  "length": 1221,
+  "signals": {
+    "schemaTypes": ["ScholarlyArticle"],
+    "sections": []
+  }
+}

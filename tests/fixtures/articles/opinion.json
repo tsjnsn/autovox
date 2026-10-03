@@ -1,0 +1,13 @@
+{
+  "title": "Opinion: Cities should stop building parking garages",
+  "byline": "By Rafael Mendes",
+  "excerpt": "Every new garage locks in the traffic we say we want to escape.",
+  "siteName": "Example Tribune",
+  "url": "https://www.example.com/opinion/2026/10/01/cities-should-stop-building-parking",
+  "textContent": "Our city council will vote next week on a $48 million parking garage downtown. It should vote no, and it should stop building garages altogether.\n\nFirst, parking is not free, even when drivers don't pay for it. Each space in a structured garage costs roughly $30,000 to build. Those costs show up in rents, in store prices, and in the taxes of people who walk, bike, or ride the bus.\n\nSecond, garages create the traffic they promise to relieve. When parking is easy and cheap, more people drive. The city's own 2023 transportation study found that downtown car trips rose 12 percent in the two years after the Fifth Street garage opened.\n\nSupporters say downtown shops will die without more parking. I understand the worry, but the evidence points the other way. On Elm Street, where the city replaced 40 parking spaces with wider sidewalks and a bike lane, sales tax receipts rose 9 percent the following year.\n\nSome will argue that older residents and people with disabilities need to drive. They do, and the city should reserve curb space for them and price the rest of it fairly. That costs far less than a garage.\n\nForty-eight million dollars could pay for frequent bus service on three routes for a decade. That's the better bet for a city that wants fewer cars, not more.",
+  "length": 1278,
+  "signals": {
+    "schemaTypes": ["OpinionNewsArticle"],
+    "sections": ["Opinion"]
+  }
+}

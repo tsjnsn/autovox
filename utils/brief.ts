@@ -15,8 +15,14 @@ import { drawLessonScenes } from './chalk/draw';
 import { LessonError, lessonToScript, planLesson } from './chalk/lesson';
 import type { ChalkLesson, SessionFormat } from './chalk/types';
 import {
+  coerceArticleTypeChoice,
+  type ArticleTypeChoice,
+  type ResolvedArticleType,
+} from './comprehension';
+import {
   addMoneyLine,
   finishMoneySession,
+  setMoneyArticleType,
   startMoneySession,
   usageToLineItem,
 } from './money';
@@ -155,6 +161,8 @@ export async function runBriefPipeline(
   signal?: AbortSignal,
   format: SessionFormat = 'brief',
   onDraft?: (draft: BriefDraft) => void,
+  /** The overlay's pick for this page; omitted uses the Options default. */
+  articleTypeChoice?: ArticleTypeChoice,
 ): Promise<{ result: BriefResult; drawing: Promise<void> | null }> {
   const chalkboard = format === 'chalkboard';
   const expectedUrl = normalizePageUrl(pageUrl);
@@ -285,8 +293,12 @@ export async function runBriefPipeline(
 
   const { comprehension: comprehensionModel, drawing: drawingModel } =
     activeModels(settings);
+  const typeChoice = coerceArticleTypeChoice(
+    articleTypeChoice ?? settings.articleType,
+  );
   let script: NewsReportScript;
   let lesson: ChalkLesson | undefined;
+  let articleType: ResolvedArticleType;
   try {
     if (chalkboard) {
       const planned = await planLesson({
@@ -295,10 +307,12 @@ export async function runBriefPipeline(
         article,
         reportLength: settings.reportLength,
         outputLanguage,
+        articleType: typeChoice,
         onProgress: onDraft ? onStream : undefined,
         signal,
       });
       lesson = planned.lesson;
+      articleType = planned.articleType;
       script = lessonToScript(planned.lesson);
       await addMoneyLine(
         sessionId,
@@ -311,10 +325,12 @@ export async function runBriefPipeline(
         article,
         reportLength: settings.reportLength,
         outputLanguage,
+        articleType: typeChoice,
         onProgress: onDraft ? onStream : undefined,
         signal,
       });
       script = understood.script;
+      articleType = understood.articleType;
       await addMoneyLine(
         sessionId,
         usageToLineItem('understand', comprehensionModel, understood.usage),
@@ -346,6 +362,7 @@ export async function runBriefPipeline(
     );
     throw error;
   }
+  await setMoneyArticleType(sessionId, articleType);
 
   const result: BriefResult = {
     source: {
@@ -355,6 +372,7 @@ export async function runBriefPipeline(
     },
     script,
     format,
+    articleType,
     ...(lesson
       ? { lesson, drawings: lesson.scenes.map(() => null) }
       : {}),

@@ -1,4 +1,14 @@
 import type { LlmAuth } from './auth';
+import {
+  articleHintLine,
+  articleHints,
+  articleTypeGuidance,
+  readArticleTypeField,
+  resolveArticleType,
+  withArticleTypeField,
+  type ArticleTypeChoice,
+  type ResolvedArticleType,
+} from './comprehension';
 import { comprehensionLanguageGuidance, type OutputLanguage } from './languages';
 import { createStructuredResponse, type StreamProgress } from './openai';
 import type { ProviderUsage } from './usage';
@@ -33,7 +43,8 @@ const newsReportSchema = {
       },
       lede: {
         type: 'string',
-        description: 'Opening sentence that hooks the listener with the core news.',
+        description:
+          'Opening sentence that hooks the listener: the core news, scene, question, finding, or claim.',
       },
       segments: {
         type: 'array',
@@ -50,32 +61,34 @@ const newsReportSchema = {
   },
 } as const;
 
-const SYSTEM_PROMPT = `You are an experienced broadcast news writer and editor.
+const SYSTEM_PROMPT = `You are an experienced broadcast writer and editor.
 
-Your job is to COMPREHEND a web page/article, then rewrite it as a spoken news report for radio/TV-style delivery.
+Your job is to COMPREHEND a web page/article, then rewrite it as a spoken report for radio/TV-style delivery, shaped by the kind of article it is.
 
 This is NOT a high-level summary (no bullet TL;DR, no "in short").
 This is NOT text-to-speech of the original page (do not read the article aloud nearly verbatim).
 
 You must demonstrate understanding:
-- Identify what actually happened, who is involved, why it matters, and what changed.
+- Identify what the piece is really about, who is involved, why it matters, and what changed.
 - Preserve important facts, names, numbers, dates, quotes, and causal relationships.
-- Reorganize for oral news: cold open → context → developments → stakes/impact → close.
+- Reorganize for the ear, following the arc for the article type below.
 - Use clear spoken prose with natural contractions. Prefer concrete details over vague abstractions.
 - Do not invent facts. If the source is ambiguous, say so briefly in journalistic language.
 - Do not include stage directions, brackets, markdown, or "here's a summary".
-- Write only what an anchor would say on air.`;
+- Write only what a presenter would say on air.`;
 
 function buildUserPrompt(
   article: ExtractedArticle,
   reportLength: ReportLength,
   outputLanguage: OutputLanguage,
+  hintLine: string | null,
 ): string {
   const meta = [
     `Title: ${article.title}`,
     article.byline ? `Byline: ${article.byline}` : null,
     article.siteName ? `Source: ${article.siteName}` : null,
     `URL: ${article.url}`,
+    hintLine,
     LENGTH_GUIDANCE[reportLength],
     comprehensionLanguageGuidance(outputLanguage),
   ]
@@ -89,7 +102,7 @@ ARTICLE TEXT:
 ${article.textContent}
 ---
 
-Produce a news-report script JSON. The "lede" is the cold open. "segments" continue the report through context, developments, stakes, and a brief close. Keep every string speakable as-is.`;
+Produce the script JSON. The "lede" is the opening line. "segments" carry the rest of the arc for the article type through to a brief close. Keep every string speakable as-is.`;
 }
 
 export async function understandArticle(options: {
@@ -98,24 +111,33 @@ export async function understandArticle(options: {
   article: ExtractedArticle;
   reportLength: ReportLength;
   outputLanguage: OutputLanguage;
+  /** Omitted means Infer. */
+  articleType?: ArticleTypeChoice;
   /** Streams the response and reports the partial script as it arrives. */
   onProgress?: (progress: StreamProgress) => void;
   signal?: AbortSignal;
-}): Promise<{ script: NewsReportScript; usage: ProviderUsage }> {
+}): Promise<{
+  script: NewsReportScript;
+  articleType: ResolvedArticleType;
+  usage: ProviderUsage;
+}> {
+  const choice = options.articleType ?? 'infer';
+  const hints = choice === 'infer' ? articleHints(options.article) : [];
   const { text: content, usage } = await createStructuredResponse({
     auth: options.auth,
     model: options.model,
-    system: SYSTEM_PROMPT,
+    system: `${SYSTEM_PROMPT}\n\n${articleTypeGuidance(choice, 'brief')}`,
     user: buildUserPrompt(
       options.article,
       options.reportLength,
       options.outputLanguage,
+      articleHintLine(hints),
     ),
     reasoningEffort: 'medium',
     maxOutputTokens: 16_000,
     jsonSchema: {
       name: newsReportSchema.name,
-      schema: newsReportSchema.schema as unknown as Record<string, unknown>,
+      schema: withArticleTypeField(newsReportSchema.schema, choice),
     },
     onProgress: options.onProgress,
     signal: options.signal,
@@ -157,6 +179,7 @@ export async function understandArticle(options: {
                 2.4,
             ),
     },
+    articleType: resolveArticleType(choice, readArticleTypeField(content), hints),
     usage,
   };
 }

@@ -21,6 +21,7 @@ import {
 import type { LlmAuth } from '../utils/auth';
 import type { SessionFormat } from '../utils/chalk/types';
 import { managedError, managedErrorData } from '../convex/lib/errors';
+import type { ArticleTypeChoice } from '../utils/comprehension';
 import {
   briefErrorKind,
   errorMessage,
@@ -234,7 +235,11 @@ async function clearActionFault(tabId: number): Promise<void> {
  */
 async function startBriefForTab(
   tabId: number,
-  options: { force?: boolean; format?: SessionFormat } = {},
+  options: {
+    force?: boolean;
+    format?: SessionFormat;
+    articleType?: ArticleTypeChoice;
+  } = {},
 ): Promise<{ ok: boolean; error?: string; skipped?: boolean }> {
   const force = options.force ?? false;
   const format = options.format ?? 'brief';
@@ -280,6 +285,7 @@ async function startBriefForTab(
       controller.signal,
       format,
       (draft) => notifyTab(tabId, { type: 'BRIEF_DRAFT', pageUrl, draft }),
+      options.articleType,
     );
     const release = () => {
       if (abortByTab.get(tabId) === controller) {
@@ -585,6 +591,7 @@ export default defineBackground(() => {
         const outcome = await startBriefForTab(tabId, {
           force: true,
           format: msg.format,
+          articleType: msg.articleType,
         });
         if (!outcome.ok && outcome.error && outcome.error !== 'Briefing aborted') {
           // Error already notified to the tab via BRIEF_ERROR

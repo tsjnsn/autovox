@@ -1,4 +1,14 @@
 import type { LlmAuth } from '../auth';
+import {
+  articleHintLine,
+  articleHints,
+  articleTypeGuidance,
+  readArticleTypeField,
+  resolveArticleType,
+  withArticleTypeField,
+  type ArticleTypeChoice,
+  type ResolvedArticleType,
+} from '../comprehension';
 import { getLanguageName, type OutputLanguage } from '../languages';
 import { createStructuredResponse, type StreamProgress } from '../openai';
 import type { ProviderUsage } from '../usage';
@@ -53,7 +63,7 @@ const lessonSchema = {
     properties: {
       title: {
         type: 'string',
-        description: 'Lesson title.',
+        description: 'Title for the whole set of boards.',
       },
       cast: {
         type: 'array',
@@ -111,36 +121,34 @@ const lessonSchema = {
   },
 } as const;
 
-const SYSTEM_PROMPT = `You are a gifted teacher at a chalkboard, known for making tricky material click.
+const SYSTEM_PROMPT = `You are a gifted presenter at a chalkboard, known for making any page click for a listener.
 
-Your job is to COMPREHEND a web page, then TEACH it as a live spoken lesson. The narration plays as audio while an illustrator draws simple stick-figure chalk scenes in sync with what you say, so the board is always a backdrop to your words.
+Your job is to COMPREHEND a web page, then PRESENT it live, shaped by the kind of article it is. The narration plays as audio while an illustrator draws simple stick-figure chalk scenes in sync with what you say, so the board is always a backdrop to your words.
 
-This is NOT a summary and NOT a read-aloud of the page. Teach it:
-- Open with a hook and say what we'll learn.
-- Build the core concepts, walk through the steps in order, flag the pitfalls, then close with a short recap.
-- If the page is not a tutorial, teach the underlying ideas it relies on and what the listener should take away.
-- Keep facts, names, numbers, commands, and the order of steps accurate. Do not invent facts, steps, or options the page does not support.
-- Speak naturally, with contractions. The narration must make sense by ear alone, but you may refer to the board the way a teacher does ("see this arrow", "over here on the left").
+This is NOT a summary and NOT a read-aloud of the page:
+- Follow the arc for the article type below; the first beat is the hook.
+- Keep facts, names, numbers, quotes, commands, and the order of events or steps accurate. Do not invent facts, steps, or options the page does not support.
+- Speak naturally, with contractions. The narration must make sense by ear alone, but you may refer to the board the way a presenter does ("see this arrow", "over here on the left").
 - Never read long code aloud. Name the key command, function, or setting and explain what it does; the board can show at most about 4 short lines of code.
 - No markdown, brackets, stage directions, or "in this summary".
 
 STRUCTURE
-- The lesson is a sequence of scenes. Each scene is one full board: written, drawn over its beats, then erased before the next scene.
+- The narration is a sequence of scenes. Each scene is one full board: written, drawn over its beats, then erased before the next scene.
 - heading: chalk title for the board, at most 32 characters.
 - visual: concrete art direction for the whole board, for an illustrator who draws only stick figures, simple shapes, arrows, short labels, and tiny code snippets. Describe the stick-figure scene or visual metaphor, the left-to-right layout, which cast members appear and what they are doing, and what gets added on each beat.
 - beats: 2–4 per scene. "say" is 1–3 spoken sentences, at most about 45 words, read verbatim by the voice. "note" is a chalk note of at most 6 words shown for that beat.
 - Beats within a scene progressively build ONE coherent picture; never switch to an unrelated picture mid-scene. Start a new scene when the picture needs to change.
 - Within a scene, things on the board can change in place (a character reacts, a number or label updates), but nothing is cleared until the scene ends. A before/after belongs side by side on one board, or on two consecutive boards.
-- cast: 1–3 recurring stick-figure characters, reused across scenes so the lesson feels continuous. Each has a short name (at most 14 characters), a distinct accessory (at most one may be "none"), and the role they play in the lesson (for example "the learner", "the server", "the build tool").
+- cast: 1–3 recurring stick-figure characters, reused across scenes so the boards feel continuous. Each has a short name (at most 14 characters), a distinct accessory (at most one may be "none"), and the role they play (for example "the user", "the server", "the mayor").
 - estimatedSeconds: estimated spoken duration of all "say" text.`;
 
 function lessonLanguageGuidance(code: OutputLanguage): string {
   const name = getLanguageName(code);
   if (!name) {
-    return `Teach in the language the PAGE TEXT below is written in (its dominant language if it mixes several): an English page gets an English lesson, a Spanish page a Spanish lesson. Never switch to a language the page doesn't use.
+    return `Narrate in the language the PAGE TEXT below is written in (its dominant language if it mixes several): an English page gets English narration, a Spanish page Spanish narration. Never switch to a language the page doesn't use.
 Every string in the JSON output (title, headings, visuals, narration, notes, cast names and roles) must be in that language.`;
   }
-  return `Teach in ${name}. Translate from the source while keeping facts, names, numbers, and commands exact.
+  return `Narrate in ${name}. Translate from the source while keeping facts, names, numbers, and commands exact.
 Every string in the JSON output (title, headings, visuals, narration, notes, cast names and roles) must be in ${name}.`;
 }
 
@@ -148,12 +156,14 @@ function buildUserPrompt(
   article: ExtractedArticle,
   reportLength: ReportLength,
   outputLanguage: OutputLanguage,
+  hintLine: string | null,
 ): string {
   const meta = [
     `Title: ${article.title}`,
     article.byline ? `Byline: ${article.byline}` : null,
     article.siteName ? `Source: ${article.siteName}` : null,
     `URL: ${article.url}`,
+    hintLine,
     LENGTH_GUIDANCE[reportLength],
     lessonLanguageGuidance(outputLanguage),
   ]
@@ -167,7 +177,7 @@ PAGE TEXT:
 ${article.textContent}
 ---
 
-Produce the chalkboard lesson JSON. The first beat of the first scene is the hook; the last scene is the recap. Keep every "say" speakable as-is.`;
+Produce the chalkboard JSON. The first beat of the first scene is the hook; the last scene closes the arc for the article type. Keep every "say" speakable as-is.`;
 }
 
 export async function planLesson(options: {
@@ -176,24 +186,33 @@ export async function planLesson(options: {
   article: ExtractedArticle;
   reportLength: ReportLength;
   outputLanguage: OutputLanguage;
+  /** Omitted means Infer. */
+  articleType?: ArticleTypeChoice;
   /** Streams the response and reports the partial lesson as it arrives. */
   onProgress?: (progress: StreamProgress) => void;
   signal?: AbortSignal;
-}): Promise<{ lesson: ChalkLesson; usage: ProviderUsage }> {
+}): Promise<{
+  lesson: ChalkLesson;
+  articleType: ResolvedArticleType;
+  usage: ProviderUsage;
+}> {
+  const choice = options.articleType ?? 'infer';
+  const hints = choice === 'infer' ? articleHints(options.article) : [];
   const { text: content, usage } = await createStructuredResponse({
     auth: options.auth,
     model: options.model,
-    system: SYSTEM_PROMPT,
+    system: `${SYSTEM_PROMPT}\n\n${articleTypeGuidance(choice, 'chalkboard')}`,
     user: buildUserPrompt(
       options.article,
       options.reportLength,
       options.outputLanguage,
+      articleHintLine(hints),
     ),
     reasoningEffort: 'medium',
     maxOutputTokens: 16_000,
     jsonSchema: {
       name: lessonSchema.name,
-      schema: lessonSchema.schema as unknown as Record<string, unknown>,
+      schema: withArticleTypeField(lessonSchema.schema, choice),
     },
     onProgress: options.onProgress,
     signal: options.signal,
@@ -206,7 +225,11 @@ export async function planLesson(options: {
       usage,
     );
   }
-  return { lesson, usage };
+  return {
+    lesson,
+    articleType: resolveArticleType(choice, readArticleTypeField(content), hints),
+    usage,
+  };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {

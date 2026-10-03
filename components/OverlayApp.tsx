@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArticleTypePicker } from './ArticleTypePicker';
 import { BriefMeter } from './BriefMeter';
 import { Chalkboard } from './Chalkboard';
 import { ScriptPreview } from './ScriptPreview';
@@ -19,7 +20,11 @@ import {
 } from '../utils/money';
 import { getSettings } from '../utils/storage';
 import { activeModels } from '../utils/models';
-import { buildTeacherInstructions, lessonTtsChunks } from '../utils/tts';
+import { buildNarratorInstructions, lessonTtsChunks } from '../utils/tts';
+import {
+  effectiveArticleTypeChoice,
+  type ArticleTypeChoice,
+} from '../utils/comprehension';
 import { downloadVideo, renderChalkVideo } from '../utils/chalk/video';
 import type {
   ChalkSceneDrawing,
@@ -106,6 +111,8 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const [sourceWords, setSourceWords] = useState<number | null>(null);
   const [draft, setDraft] = useState<BriefDraft | null>(null);
   const [result, setResult] = useState<BriefResult | null>(null);
+  const [articleTypeOverride, setArticleTypeOverride] =
+    useState<ArticleTypeChoice | null>(null);
   const [fault, setFault] = useState<BriefFault | null>(null);
   const [streamKey, setStreamKey] = useState(0);
   const [narrating, setNarrating] = useState(false);
@@ -292,10 +299,19 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     () => (lesson ? lessonTtsChunks(lesson) : undefined),
     [lesson],
   );
-  const teacherInstructions =
-    lesson && settings
-      ? buildTeacherInstructions(result?.outputLanguage ?? settings.outputLanguage)
+  const narratorInstructions =
+    result && settings && (lesson || result.articleType)
+      ? buildNarratorInstructions({
+          articleType: result.articleType?.type,
+          chalkboard: Boolean(lesson),
+          outputLanguage: result.outputLanguage ?? settings.outputLanguage,
+        })
       : undefined;
+  const articleTypeChoice = effectiveArticleTypeChoice(
+    articleTypeOverride,
+    result?.articleType ?? null,
+    settings?.articleType,
+  );
 
   const handleNarration = useCallback((pcm: Uint8Array | null) => {
     exportAbortRef.current?.abort();
@@ -353,6 +369,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
       setSourceWords(null);
       setDraft(null);
       setNarrating(false);
+      setArticleTypeOverride(null);
     };
 
     const loadBriefState = async () => {
@@ -511,6 +528,11 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     const response = (await browser.runtime.sendMessage({
       type: 'START_BRIEF',
       format,
+      articleType: effectiveArticleTypeChoice(
+        articleTypeOverride,
+        result?.articleType ?? null,
+        latest.articleType,
+      ),
     })) as { ok: true } | ErrorResponse | undefined;
 
     if (!response?.ok) {
@@ -613,7 +635,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
               key={`${streamKey}:${settings!.providerMode}`}
               script={result!.script}
               chunks={lessonChunks}
-              ttsInstructions={teacherInstructions}
+              ttsInstructions={narratorInstructions}
               prefetch={lesson ? 2 : 0}
               onChunkTimeline={lesson ? setTimeline : undefined}
               clockRef={lesson ? clockRef : undefined}
@@ -719,6 +741,17 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
               </button>
             </>
           ) : null}
+          <ArticleTypePicker
+            choice={articleTypeChoice}
+            current={result?.articleType ?? null}
+            onChoose={setArticleTypeOverride}
+            onRebrief={() => void startBrief(result?.format ?? 'brief')}
+            chalkboard={Boolean(lesson)}
+            managedLength={
+              settings?.providerMode === 'managed' ? settings.reportLength : null
+            }
+            disabled={extracting}
+          />
         </div>
       </div>
     </div>

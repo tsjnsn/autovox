@@ -13,6 +13,11 @@ import {
   useAuth,
 } from '@clerk/chrome-extension';
 import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../../utils/auth';
+import {
+  ARTICLE_TYPE_CHOICES,
+  ARTICLE_TYPE_SPECS,
+  coerceArticleTypeChoice,
+} from '../../utils/comprehension';
 import { connectOpenRouter } from '../../utils/connect';
 import type { ErrorResponse } from '../../utils/errors';
 import {
@@ -981,6 +986,32 @@ export default function App() {
             <p className="hint">
               Auto uses the article&apos;s language. Pick another to translate
               the report. Voices sound most natural in English.
+            </p>
+          </label>
+
+          <label>
+            Article type
+            <select
+              value={settings.articleType}
+              onChange={(e) =>
+                setSettings((s) => ({
+                  ...s,
+                  articleType: coerceArticleTypeChoice(e.target.value),
+                }))
+              }
+            >
+              {ARTICLE_TYPE_CHOICES.map((choice) => (
+                <option key={choice} value={choice}>
+                  {choice === 'infer'
+                    ? 'Infer from the article'
+                    : ARTICLE_TYPE_SPECS[choice].label}
+                </option>
+              ))}
+            </select>
+            <p className="hint">
+              Shapes how a brief is told: a news report, a story, a lesson, an
+              argument. Infer picks per article; the overlay can override it
+              for one page.
             </p>
           </label>
 

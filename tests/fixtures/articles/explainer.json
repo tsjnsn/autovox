@@ -1,0 +1,13 @@
+{
+  "title": "What is a heat dome? Why some summers get stuck",
+  "byline": "By Priya Raman",
+  "excerpt": "A ridge of high pressure can trap hot air over a region for weeks.",
+  "siteName": "Example Weather Desk",
+  "url": "https://www.example.com/explainers/what-is-a-heat-dome",
+  "textContent": "Every few summers, forecasters warn of a \"heat dome.\" It sounds like science fiction, but the idea is simple: a lid of high pressure parks over a region and keeps it baking.\n\nHere's how it works. High in the atmosphere, air sinks over the region. Sinking air gets squeezed as it descends, and squeezed air warms up, the same reason a bicycle pump gets hot. That warm, sinking air also pushes clouds away, so the sun heats the ground all day with nothing in the way.\n\nThe ground then heats the air near the surface, and the dome keeps that air from rising and cooling off. Night brings little relief, because dry, still air holds the day's heat close.\n\nWhy does it get stuck? The jet stream, a river of fast wind high above, usually pushes weather systems along. When the jet stream slows and bends into big loops, a high-pressure ridge can sit in one place for a week or more.\n\nA common misconception is that a heat dome is a physical barrier. It isn't. It's a pattern of air pressure, and it breaks down when the jet stream picks up again or a stronger system shoves it aside.\n\nThe short version: sinking air warms, clear skies add sun, and a lazy jet stream keeps the whole thing in place.",
+  "length": 1191,
+  "signals": {
+    "schemaTypes": ["BackgroundNewsArticle"],
+    "sections": []
+  }
+}

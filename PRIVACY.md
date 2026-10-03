@@ -47,7 +47,7 @@ Reconciled per-session product records are deleted after 90 days. Aggregate dail
 
 Settings (OpenRouter connection, optional OpenAI API key, voice, output language, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state may be kept in session storage while the extension is active.
 
-Autovox also keeps a **local spend ledger** on this profile: cost, model, stage (understand, narrate, or chalkboard drawing), outcome (completed / fault / aborted), report length, voice, and output language. That record does **not** include the page URL, title, or article text. BYOK ledger records are not sent to Autovox.
+Autovox also keeps a **local spend ledger** on this profile: cost, model, stage (understand, narrate, or chalkboard drawing), outcome (completed / fault / aborted), report length, voice, output language, and the article type the brief was written as (and whether you picked it or Autovox inferred it). That record does **not** include the page URL, title, or article text. BYOK ledger records are not sent to Autovox.
 
 Short-lived managed provider keys are held in `chrome.storage.session`, not local or sync storage, and are disabled after the session or automatically expire.
 

@@ -1,5 +1,19 @@
 import { Readability } from '@mozilla/readability';
+import { pageSignalsFromJsonLd, type PageSignals } from './comprehension';
 import type { ExtractedArticle } from './types';
+
+/** schema.org types and sections; Readability drops both from its output. */
+function readPageSignals(doc: Document): PageSignals {
+  const blocks = Array.from(
+    doc.querySelectorAll('script[type="application/ld+json"]'),
+    (el) => el.textContent ?? '',
+  ).slice(0, 10);
+  const sections = Array.from(
+    doc.querySelectorAll('meta[property="article:section"]'),
+    (el) => el.getAttribute('content') ?? '',
+  );
+  return pageSignalsFromJsonLd(blocks, sections);
+}
 
 function cleanText(text: string): string {
   return text
@@ -27,6 +41,7 @@ export function extractArticleFromDocument(
   doc: Document = document,
 ): ExtractedArticle | null {
   const url = doc.location?.href ?? window.location.href;
+  const signals = readPageSignals(doc);
   const clone = doc.cloneNode(true) as Document;
   stripAutovoxUi(clone);
 
@@ -45,6 +60,7 @@ export function extractArticleFromDocument(
       url,
       textContent: bodyText.slice(0, 60_000),
       length: bodyText.length,
+      signals,
     };
   }
 
@@ -58,5 +74,6 @@ export function extractArticleFromDocument(
     url,
     textContent,
     length: textContent.length,
+    signals,
   };
 }

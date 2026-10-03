@@ -1,3 +1,4 @@
+import { coerceArticleTypeChoice } from './comprehension';
 import { coerceOutputLanguage } from './languages';
 import {
   coerceVoice,
@@ -38,6 +39,7 @@ export async function getSettings(): Promise<Settings> {
     voice: coerceVoice(merged.voice),
     reportLength: merged.reportLength ?? DEFAULT_SETTINGS.reportLength,
     outputLanguage: coerceOutputLanguage(merged.outputLanguage),
+    articleType: coerceArticleTypeChoice(merged.articleType),
     comprehensionModel: coerceModel(
       merged.comprehensionModel,
       DEFAULT_SETTINGS.comprehensionModel,
