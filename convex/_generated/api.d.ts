@@ -16,6 +16,7 @@ import type * as http from "../http.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_customFunctions from "../lib/customFunctions.js";
 import type * as lib_economics from "../lib/economics.js";
+import type * as lib_errors from "../lib/errors.js";
 import type * as openrouter from "../openrouter.js";
 import type * as operator from "../operator.js";
 import type * as sessions from "../sessions.js";
@@ -36,6 +37,7 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/customFunctions": typeof lib_customFunctions;
   "lib/economics": typeof lib_economics;
+  "lib/errors": typeof lib_errors;
   openrouter: typeof openrouter;
   operator: typeof operator;
   sessions: typeof sessions;

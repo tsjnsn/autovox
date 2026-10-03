@@ -37,6 +37,7 @@ export const sessionOutcomeValidator = v.union(
 
 export const sessionKindValidator = v.union(
   v.literal("brief"),
+  v.literal("chalkboard"),
   v.literal("tts_replay"),
 );
 
