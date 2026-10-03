@@ -21,7 +21,7 @@ export const MANAGED_ERROR_CODES = [
   "invalid_request",
   "not_found",
   "forbidden",
-  /** OpenRouter could not provision a session key. */
+  /** OpenRouter could not provision a session key, or Stripe could not start checkout. */
   "provider_unavailable",
   "product_unavailable",
   "not_configured",

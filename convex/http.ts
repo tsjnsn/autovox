@@ -152,12 +152,14 @@ http.route({
     if (!expected || supplied !== expected) {
       return new Response("Unauthorized", { status: 401 });
     }
+    const now = Date.now();
     const requestedSince = new URL(request.url).searchParams.get("since");
-    const defaultSince = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000)
+    const defaultSince = new Date(now - 30 * 24 * 60 * 60 * 1000)
       .toISOString()
       .slice(0, 10);
     const snapshot = await ctx.runQuery(internal.operator.snapshot, {
       sinceDate: requestedSince ?? defaultSince,
+      now,
     });
     return Response.json(snapshot, {
       headers: { "Cache-Control": "no-store" },

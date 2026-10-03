@@ -1,5 +1,11 @@
 import { v } from "convex/values";
+import type { Doc, Id } from "./_generated/dataModel";
 import { internalQuery, mutation } from "./_generated/server";
+import {
+  accountNotInitialized,
+  accountSuspended,
+  requireIdentity,
+} from "./lib/auth";
 import { TRIAL_CREDITS } from "./lib/economics";
 import { authedQuery } from "./lib/customFunctions";
 
@@ -16,13 +22,10 @@ export const ensure = mutation({
   args: {},
   returns: statusReturn,
   handler: async (ctx) => {
-    const identity = await ctx.auth.getUserIdentity();
-    if (!identity) {
-      throw new Error("Not authenticated");
-    }
+    const identity = await requireIdentity(ctx);
 
     const now = Date.now();
-    let account = await ctx.db
+    const account = await ctx.db
       .query("accounts")
       .withIndex("by_token", (q) =>
         q.eq("tokenIdentifier", identity.tokenIdentifier),
@@ -38,7 +41,7 @@ export const ensure = mutation({
         createdAt: now,
         updatedAt: now,
       });
-      const balanceId = await ctx.db.insert("creditBalances", {
+      await ctx.db.insert("creditBalances", {
         accountId,
         grantedCredits: TRIAL_CREDITS,
         consumedCredits: 0,
@@ -55,28 +58,15 @@ export const ensure = mutation({
         sourceId: "managed-trial-v1",
         createdAt: now,
       });
-      account = await ctx.db.get("accounts", accountId);
-      const balance = await ctx.db.get("creditBalances", balanceId);
-      if (!account || !balance) {
-        throw new Error("Failed to initialize account");
-      }
-      return {
-        accountId,
-        role: account.role,
-        grantedCredits: balance.grantedCredits,
-        consumedCredits: balance.consumedCredits,
-        reservedCredits: balance.reservedCredits,
-        availableCredits: Math.max(
-          0,
-          balance.grantedCredits -
-          balance.consumedCredits -
-            balance.reservedCredits,
-        ),
-      };
+      return statusFor(accountId, "user", {
+        grantedCredits: TRIAL_CREDITS,
+        consumedCredits: 0,
+        reservedCredits: 0,
+      });
     }
 
     if (account.status !== "active") {
-      throw new Error("Account is suspended");
+      throw accountSuspended();
     }
 
     const balance = await ctx.db
@@ -84,22 +74,9 @@ export const ensure = mutation({
       .withIndex("by_account", (q) => q.eq("accountId", account._id))
       .unique();
     if (!balance) {
-      throw new Error("Account balance is missing");
+      throw accountNotInitialized();
     }
-
-    return {
-      accountId: account._id,
-      role: account.role,
-      grantedCredits: balance.grantedCredits,
-      consumedCredits: balance.consumedCredits,
-      reservedCredits: balance.reservedCredits,
-      availableCredits: Math.max(
-        0,
-        balance.grantedCredits -
-        balance.consumedCredits -
-          balance.reservedCredits,
-      ),
-    };
+    return statusFor(account._id, account.role, balance);
   },
 });
 
@@ -114,21 +91,9 @@ export const getStatus = authedQuery({
       )
       .unique();
     if (!balance) {
-      throw new Error("Account balance is missing");
+      throw accountNotInitialized();
     }
-    return {
-      accountId: ctx.account._id,
-      role: ctx.account.role,
-      grantedCredits: balance.grantedCredits,
-      consumedCredits: balance.consumedCredits,
-      reservedCredits: balance.reservedCredits,
-      availableCredits: Math.max(
-        0,
-        balance.grantedCredits -
-        balance.consumedCredits -
-          balance.reservedCredits,
-      ),
-    };
+    return statusFor(ctx.account._id, ctx.account.role, balance);
   },
 });
 
@@ -158,3 +123,26 @@ export const getByToken = internalQuery({
       : null;
   },
 });
+
+function statusFor(
+  accountId: Id<"accounts">,
+  role: Doc<"accounts">["role"],
+  balance: Pick<
+    Doc<"creditBalances">,
+    "grantedCredits" | "consumedCredits" | "reservedCredits"
+  >,
+) {
+  return {
+    accountId,
+    role,
+    grantedCredits: balance.grantedCredits,
+    consumedCredits: balance.consumedCredits,
+    reservedCredits: balance.reservedCredits,
+    availableCredits: Math.max(
+      0,
+      balance.grantedCredits -
+        balance.consumedCredits -
+        balance.reservedCredits,
+    ),
+  };
+}

@@ -2,13 +2,17 @@ import { v } from "convex/values";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { action, internalAction } from "./_generated/server";
+import { notAuthenticated } from "./lib/auth";
 import {
   DEFAULT_DAILY_BUDGET_MICRO_USD,
+  DEFAULT_TRIAL_DAILY_BUDGET_MICRO_USD,
   MICRO_USD_PER_USD,
-  parsePositiveIntegerEnv,
   sessionCapMicroUsd,
   utcDayWindow,
 } from "./lib/economics";
+import { positiveIntegerEnv, requireEnv } from "./lib/env";
+import { managedError } from "./lib/errors";
+import { settleDueAt } from "./lib/reconciliation";
 import {
   reportLengthValidator,
   sessionKindValidator,
@@ -16,7 +20,7 @@ import {
 
 const KEY_API = "https://openrouter.ai/api/v1/keys";
 const KEY_LIFETIME_MS = 15 * 60 * 1000;
-const RECONCILIATION_GRACE_MS = 10 * 60 * 1000;
+const USAGE_RECHECK_DELAY_MS = 2_000;
 const POLICY_VERSION = "managed-v1";
 
 type OpenSessionResult = {
@@ -44,19 +48,26 @@ export const openSession = action({
   handler: async (ctx, args): Promise<OpenSessionResult> => {
     const identity = await ctx.auth.getUserIdentity();
     if (!identity) {
-      throw new Error("Not authenticated");
+      throw notAuthenticated();
     }
     const managementKey = requireEnv("OPENROUTER_MANAGEMENT_KEY");
     const now = Date.now();
     const window = utcDayWindow(now);
     const expiresAt = Math.min(now + KEY_LIFETIME_MS, window.end);
     if (expiresAt - now < 2 * 60 * 1000) {
-      throw new Error("Managed listening resets at midnight UTC; retry shortly");
+      throw managedError(
+        "retry_shortly",
+        "Managed listening resets at midnight UTC. Try again in a couple of minutes.",
+      );
     }
     const reservedMicroUsd = sessionCapMicroUsd(args.reportLength);
-    const dailyBudgetMicroUsd = parsePositiveIntegerEnv(
-      process.env.AUTOVOX_DAILY_BUDGET_MICRO_USD,
+    const dailyBudgetMicroUsd = positiveIntegerEnv(
+      "AUTOVOX_DAILY_BUDGET_MICRO_USD",
       DEFAULT_DAILY_BUDGET_MICRO_USD,
+    );
+    const trialDailyBudgetMicroUsd = positiveIntegerEnv(
+      "AUTOVOX_TRIAL_DAILY_BUDGET_MICRO_USD",
+      DEFAULT_TRIAL_DAILY_BUDGET_MICRO_USD,
     );
 
     const reservation: {
@@ -77,6 +88,7 @@ export const openSession = action({
       budgetWindowStart: window.start,
       budgetWindowEnd: window.end,
       dailyBudgetMicroUsd,
+      trialDailyBudgetMicroUsd,
     });
 
     let keyHash: string | null = null;
@@ -116,6 +128,7 @@ export const openSession = action({
         reservedCredits: reservation.reservedCredits,
       };
     } catch (error) {
+      console.error("Managed session provisioning failed", describeError(error));
       if (keyHash) {
         await deleteKey(managementKey, keyHash).catch(() => undefined);
       }
@@ -123,7 +136,10 @@ export const openSession = action({
         sessionId: reservation.sessionId,
         now: Date.now(),
       });
-      throw error;
+      throw managedError(
+        "provider_unavailable",
+        "The listening provider is unavailable right now. Try again in a few minutes.",
+      );
     }
   },
 });
@@ -135,68 +151,67 @@ export const finalizeSession = internalAction({
     const session = await ctx.runQuery(internal.sessions.getForFinalize, {
       sessionId: args.sessionId,
     });
-    if (!session || session.status === "reconciled") return null;
+    if (!session || session.status === "reconciled" || !session.outcome) {
+      return null;
+    }
 
     try {
-      if (!session.outcome) {
-        throw new Error("Managed session is not terminal");
+      const key = session.keyHash
+        ? {
+            hash: session.keyHash,
+            managementKey: requireEnv("OPENROUTER_MANAGEMENT_KEY"),
+          }
+        : null;
+      // An expired key can no longer spend, so a failing disable must not keep the account blocked.
+      if (key && Date.now() < session.keyExpiresAt) {
+        await disableKey(key.managementKey, key.hash);
       }
-      if (!session.keyHash) {
-        await ctx.runMutation(internal.sessions.closeReservation, {
-          sessionId: args.sessionId,
-        });
-        const claimed = await ctx.runMutation(
-          internal.sessions.claimFinalize,
-          { sessionId: args.sessionId, now: Date.now() },
-        );
-        if (!claimed) return null;
-        await ctx.runMutation(internal.sessions.settle, {
-          sessionId: args.sessionId,
-          actualMicroUsd: 0,
-          now: Date.now(),
-        });
-        return null;
-      }
-
-      const managementKey = requireEnv("OPENROUTER_MANAGEMENT_KEY");
-      await disableKey(managementKey, session.keyHash);
       await ctx.runMutation(internal.sessions.closeReservation, {
         sessionId: args.sessionId,
       });
-      const settleAfter =
-        session.keyExpiresAt + RECONCILIATION_GRACE_MS;
-      if (Date.now() < settleAfter) {
-        await ctx.scheduler.runAt(
-          settleAfter,
-          internal.openrouter.finalizeSession,
-          { sessionId: args.sessionId },
-        );
-        return null;
-      }
+      const settleAt = settleDueAt({
+        keyExpiresAt: session.keyExpiresAt,
+        openRouterKeyHash: session.keyHash,
+      });
+      if (Date.now() < settleAt) return null;
+
       const claimed = await ctx.runMutation(
         internal.sessions.claimFinalize,
         { sessionId: args.sessionId, now: Date.now() },
       );
       if (!claimed) return null;
 
-      const firstObserved = await readKeyUsageMicroUsd(
-        managementKey,
-        session.keyHash,
-      );
-      await new Promise((resolve) => setTimeout(resolve, 2_000));
-      const actualMicroUsd = await readKeyUsageMicroUsd(
-        managementKey,
-        session.keyHash,
-      );
-      if (actualMicroUsd !== firstObserved) {
-        throw new Error("OpenRouter usage has not settled");
+      let actualMicroUsd = 0;
+      if (key) {
+        const firstObserved = await readKeyUsageMicroUsd(
+          key.managementKey,
+          key.hash,
+        );
+        await new Promise((resolve) =>
+          setTimeout(resolve, USAGE_RECHECK_DELAY_MS),
+        );
+        actualMicroUsd = await readKeyUsageMicroUsd(
+          key.managementKey,
+          key.hash,
+        );
+        if (actualMicroUsd !== firstObserved) {
+          await ctx.runMutation(internal.sessions.deferReconcile, {
+            sessionId: args.sessionId,
+            now: Date.now(),
+          });
+          return null;
+        }
       }
       await ctx.runMutation(internal.sessions.settle, {
         sessionId: args.sessionId,
         actualMicroUsd,
         now: Date.now(),
       });
-    } catch {
+    } catch (error) {
+      console.error("Managed session reconciliation failed", {
+        sessionId: args.sessionId,
+        error: describeError(error),
+      });
       await ctx.runMutation(internal.sessions.markReconcileFailed, {
         sessionId: args.sessionId,
         now: Date.now(),
@@ -223,12 +238,8 @@ export const deleteSessionKey = internalAction({
   },
 });
 
-function requireEnv(name: string): string {
-  const value = process.env[name]?.trim();
-  if (!value) {
-    throw new Error(`${name} is not configured`);
-  }
-  return value;
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function managementHeaders(managementKey: string): Record<string, string> {

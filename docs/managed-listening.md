@@ -18,7 +18,8 @@ Initial hard limits:
 - short session key: $0.03
 - standard session key: $0.06
 - deep session key: $0.10
-- global production provider budget: $20/day
+- production provider budget: $20/day (UTC), covering every managed session
+- trial provider pool: $5/day (UTC), shared by accounts that have never purchased; trial spend also counts toward the production budget
 - one active funded session per account
 
 Create a $9 USD one-time Stripe price for the 100-credit pack. The amount is configured server-side; the extension never submits a price or credit quantity.
@@ -44,6 +45,7 @@ CLERK_JWT_ISSUER_DOMAIN
 OPENROUTER_MANAGEMENT_KEY
 OPENROUTER_WORKSPACE_ID
 AUTOVOX_DAILY_BUDGET_MICRO_USD=20000000
+AUTOVOX_TRIAL_DAILY_BUDGET_MICRO_USD=5000000
 STRIPE_SECRET_KEY
 STRIPE_WEBHOOK_SECRET
 STRIPE_PRICE_CREDIT_PACK_100
@@ -53,6 +55,30 @@ AUTOVOX_OPERATOR_SECRET
 ```
 
 Use `pnpm exec convex deploy` only for the production launch after the development deployment, tests, and disclosures are approved.
+
+`pnpm test:convex` (part of `pnpm check`) runs the Convex functions against convex-test's in-memory backend with OpenRouter stubbed; it never contacts a deployment. The `@convex-dev/stripe` component isn't registered in those tests (version 0.1.6 doesn't ship the test helper its package exports), so tests that reach a Stripe call only assert that the failure surfaces as `provider_unavailable`.
+
+After deploying this version over a deployment that already has sessions awaiting reconciliation, run this once so the cron picks them up:
+
+```bash
+pnpm exec convex run sessions:backfillReconcileSchedule
+```
+
+### Budgets, freezes, and the kill switch
+
+- Each session reserves its key cap against today's (UTC) `production` budget window. Sessions for accounts that have never purchased also reserve against the `trial` window, so trial spend can't crowd out paying customers. When the trial pool is used up, trial accounts get `trial_budget_reached` (buy credits or try tomorrow) while paid accounts keep listening.
+- If settled provider spend overshoots a window's cap, only that day's window freezes. A frozen production window pauses new sessions until the next UTC day; a frozen trial window stops only trial-funded sessions. The next day's windows open automatically.
+- Reconciliation failures never freeze anything. Convex retries a session's usage read 5 minutes, 15 minutes, 1 hour, 4 hours, and 12 hours after successive failures, with at most one retry pending per session. After the sixth failed attempt it settles the session at its full key cap, records `costSource: "worst_case"`, and logs an error. Usage that changes between two reads is re-read 5 minutes later and doesn't count as a failure.
+- The kill switch is the only global pause, and only an operator sets or clears it:
+
+```bash
+pnpm exec convex run sessions:setProductionFreeze '{"frozen":true,"reason":"provider incident"}'
+pnpm exec convex run sessions:setProductionFreeze '{"frozen":false}'
+```
+
+Add `--prod` to target the production deployment. Clearing the kill switch doesn't reopen a day's overshot budget window; that window stays frozen until the next UTC day.
+
+The operator snapshot (`/operator/snapshot`, version 2) reports `killSwitch`, today's `budget`, and today's `trialBudget` separately. The economics operator stops only for the kill switch or a frozen production window.
 
 ## 3. Clerk
 
@@ -78,7 +104,7 @@ Development unpacked builds can have a different extension ID. Add that origin t
    - disable prompt/completion logging and training
 5. Do not enable unlimited auto-top-up.
 
-Convex creates one inference key per session. The key is returned once, stored only in browser session storage, dollar-capped, disabled at terminal state, reconciled, and deleted. If reconciliation fails three times, funded listening freezes.
+Convex creates one inference key per session. The key is returned once, stored only in browser session storage, dollar-capped, disabled at terminal state, reconciled, and deleted. If reconciliation keeps failing, Convex settles the session at its key cap instead of freezing (see [Budgets, freezes, and the kill switch](#budgets-freezes-and-the-kill-switch)).
 
 ## 5. Stripe
 

@@ -10,21 +10,33 @@ export interface DailyEconomics {
   creditsConsumed: number;
   grossRevenueMicroUsd: number;
   confirmedPayments: number;
+  /** Absent on days recorded before chalkboard sessions were tracked. */
+  chalkboardStarted?: number;
+  chalkboardCompleted?: number;
+  chalkboardProviderCostMicroUsd?: number;
+  chalkboardCreditsConsumed?: number;
+}
+
+export interface BudgetWindowState {
+  windowStart: number;
+  windowEnd: number;
+  capMicroUsd: number;
+  consumedMicroUsd: number;
+  reservedMicroUsd: number;
+  frozen: boolean;
+  freezeReason?: string;
 }
 
 export interface EconomicsSnapshot {
-  snapshotVersion: 1;
+  snapshotVersion: 2;
   sinceDate: string;
   daily: DailyEconomics[];
-  budget: {
-    windowStart: number;
-    windowEnd: number;
-    capMicroUsd: number;
-    consumedMicroUsd: number;
-    reservedMicroUsd: number;
-    frozen: boolean;
-    freezeReason?: string;
-  } | null;
+  /** Manual pause; only an operator sets or clears it. */
+  killSwitch: { frozen: boolean; reason?: string };
+  /** Today's (UTC) overall provider budget, or null before today's first reservation. */
+  budget: BudgetWindowState | null;
+  /** Today's (UTC) pool for accounts that have never purchased. */
+  trialBudget: BudgetWindowState | null;
 }
 
 export type OperatorObjective =
@@ -105,13 +117,15 @@ export function evaluateEconomics(
     "one focused pull request with tests and rollback",
   ];
 
-  if (snapshot.budget?.frozen) {
+  if (snapshot.killSwitch.frozen || snapshot.budget?.frozen) {
     return {
       decisionVersion: 1,
       objective: "freeze",
-      reason:
-        snapshot.budget.freezeReason ??
-        "The deterministic budget controller froze managed listening.",
+      reason: snapshot.killSwitch.frozen
+        ? (snapshot.killSwitch.reason ??
+          "An operator paused managed listening with the kill switch.")
+        : (snapshot.budget?.freezeReason ??
+          "Today's provider budget window is frozen."),
       evidence,
       expectedEffect: "Prevent additional unbounded provider spend.",
       allowedPaths: [],

@@ -44,11 +44,13 @@ Do **not** add GA4, PostHog, or generic in-extension telemetry. Managed mode col
 Managed mode is deliberately bounded:
 
 1. Clerk authenticates a managed account.
-2. Convex reserves customer credits and the global provider budget transactionally.
+2. Convex reserves customer credits and today's (UTC) provider budget transactionally. Accounts that have never purchased also draw on a smaller daily trial pool.
 3. Convex creates a short-lived OpenRouter key capped to the session.
 4. The extension sends page content directly to OpenRouter with ZDR enforced.
 5. Terminal state disables the key; Convex reconciles provider truth and deletes it.
 6. Stripe webhooks grant purchased credits and record settled revenue/refunds.
+
+A provider overshoot freezes only that day's budget window. Reconciliation failures retry with backoff and finally settle at the session's key cap; they never freeze. The only global pause is the operator-controlled kill switch.
 
 The first offer is 3 trial credits and a one-time 100-credit pack. Subscription is a later decision only after repeat purchases prove recurring demand. See [managed-listening.md](managed-listening.md) for the one-time launch setup.
 
@@ -67,7 +69,7 @@ It writes:
 
 The decision order is code, not an LLM:
 
-1. frozen budget / reconciliation failure → stop
+1. kill switch on, or today's production budget window frozen → stop
 2. no managed trial starts → acquisition
 3. 10 trials and no payment → paid conversion
 4. completion below 85% → reliability
