@@ -14,6 +14,7 @@ import type {
   ChalkSceneDrawing,
   SessionFormat,
 } from './chalk/types';
+import type { BriefErrorKind } from './errors';
 
 export type ReportLength = 'short' | 'standard' | 'deep';
 export type ProviderMode = 'managed' | 'byok';
@@ -173,7 +174,7 @@ export type ExtensionMessage =
       scene: number;
       drawing: ChalkSceneDrawing;
     }
-  | { type: 'BRIEF_ERROR'; error: string };
+  | { type: 'BRIEF_ERROR'; error: string; kind: BriefErrorKind };
 
 export const VOICES: { id: VoiceId; label: string }[] = [
   { id: 'sage', label: 'Sage' },

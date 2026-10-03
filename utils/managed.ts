@@ -2,6 +2,7 @@ import { createClerkClient } from "@clerk/chrome-extension/client";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { managedError } from "../convex/lib/errors";
 import type { LlmAuth } from "./auth";
 import type { OutputLanguage } from "./languages";
 import type {
@@ -71,7 +72,7 @@ export async function createManagedCheckout(): Promise<string> {
 }
 
 export async function openManagedSession(options: {
-  kind: "brief" | "tts_replay";
+  kind: "brief" | "chalkboard" | "tts_replay";
   reportLength: ReportLength;
   voice: VoiceId;
   outputLanguage: OutputLanguage;
@@ -205,15 +206,24 @@ async function withManagedClient<T>(
   operation: (client: ConvexHttpClient) => Promise<T>,
 ): Promise<T> {
   if (!isManagedConfigured()) {
-    throw new Error("Managed listening is not configured in this build");
+    throw managedError(
+      "not_configured",
+      "Managed listening is not configured in this build",
+    );
   }
   const token = await getManagedToken();
   if (!token) {
-    throw new Error("Sign in to Autovox in Options for managed listening");
+    throw managedError(
+      "not_authenticated",
+      "Sign in to Autovox in Options for managed listening",
+    );
   }
   const url = import.meta.env.WXT_PUBLIC_CONVEX_URL?.trim();
   if (!url) {
-    throw new Error("Managed listening backend is not configured");
+    throw managedError(
+      "not_configured",
+      "Managed listening backend is not configured",
+    );
   }
   const client = new ConvexHttpClient(url);
   client.setAuth(token);
@@ -229,7 +239,7 @@ async function getManagedToken(): Promise<string | null> {
 async function createBackgroundClerk() {
   const publishableKey = managedPublishableKey();
   if (!publishableKey) {
-    throw new Error("Clerk is not configured in this build");
+    throw managedError("not_configured", "Clerk is not configured in this build");
   }
   return await createClerkClient({
     publishableKey,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { LlmAuth } from "../utils/auth";
-import { createStructuredResponse } from "../utils/openai";
+import { createStructuredResponse, OpenAIError } from "../utils/openai";
 
 const OPENROUTER: LlmAuth = {
   mode: "openrouter",
@@ -65,6 +65,34 @@ void test("hosts that accept every parameter are used on the first try", async (
     assert.equal(fake.bodies[0]?.provider?.require_parameters, true);
   } finally {
     fake.restore();
+  }
+});
+
+const streamFailing = (error: Record<string, unknown>) =>
+  new Response(`data: ${JSON.stringify({ type: "error", error })}\n\n`, {
+    status: 200,
+  });
+
+void test("a provider failure mid-stream carries a status", async () => {
+  const cases: Array<[Record<string, unknown>, number | undefined]> = [
+    [{ code: "server_error", message: "Provider disconnected unexpectedly" }, 502],
+    [{ code: "rate_limit_exceeded", message: "Slow down" }, 429],
+    [{ code: 503, message: "Provider returned error" }, 503],
+    [{ code: "invalid_prompt", message: "Refused" }, undefined],
+  ];
+  for (const [error, status] of cases) {
+    const fake = withFetch([streamFailing(error)]);
+    try {
+      await assert.rejects(
+        createStructuredResponse({ auth: OPENROUTER, ...REQUEST, onProgress: () => {} }),
+        (thrown: unknown) =>
+          thrown instanceof OpenAIError &&
+          thrown.message === error.message &&
+          thrown.status === status,
+      );
+    } finally {
+      fake.restore();
+    }
   }
 });
 

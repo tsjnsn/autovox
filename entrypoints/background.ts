@@ -20,6 +20,13 @@ import {
 } from '../utils/managed';
 import type { LlmAuth } from '../utils/auth';
 import type { SessionFormat } from '../utils/chalk/types';
+import { managedError, managedErrorData } from '../convex/lib/errors';
+import {
+  briefErrorKind,
+  errorMessage,
+  errorResponse,
+  type ErrorResponse,
+} from '../utils/errors';
 import type { BriefProgress, ExtensionMessage } from '../utils/types';
 
 const CONTEXT_MENU_VOX_PAGE = 'autovox-vox-page';
@@ -134,8 +141,7 @@ async function acquireManagedAuthForTab(
         } catch (error) {
           lastError = error;
           if (
-            !(error instanceof Error) ||
-            !error.message.includes('already in progress') ||
+            managedErrorData(error)?.code !== 'session_in_progress' ||
             attempt === 2
           ) {
             throw error;
@@ -179,9 +185,15 @@ async function toggleOverlayOnTab(tabId: number): Promise<void> {
   await browser.tabs.sendMessage(tabId, { type: 'TOGGLE_UI' });
 }
 
+/** Resolves once the overlay is listening for BRIEF_* messages. */
 async function openOverlayOnTab(tabId: number): Promise<void> {
   await ensureContentScript(tabId);
-  await browser.tabs.sendMessage(tabId, { type: 'OPEN_UI' });
+  const response = (await browser.tabs.sendMessage(tabId, {
+    type: 'OPEN_UI',
+  })) as { ok: boolean; error?: string } | undefined;
+  if (!response?.ok) {
+    throw new Error(response?.error ?? 'Overlay did not open');
+  }
 }
 
 /**
@@ -267,23 +279,23 @@ async function startBriefForTab(
       notifyTab(tabId, { type: 'BRIEF_RESET' });
       return { ok: false, error: 'Briefing aborted' };
     }
-    const errorMessage =
-      error instanceof Error ? error.message : 'Briefing failed';
+    const errorText = errorMessage(error, 'Briefing failed');
     await setTabProgress(
       tabId,
       pageUrl,
       {
         phase: 'error',
         message: 'Error',
-        detail: errorMessage,
+        detail: errorText,
       },
       false,
     );
     notifyTab(tabId, {
       type: 'BRIEF_ERROR',
-      error: errorMessage,
+      error: errorText,
+      kind: briefErrorKind(error),
     });
-    return { ok: false, error: errorMessage };
+    return { ok: false, error: errorText };
   }
 }
 
@@ -327,8 +339,6 @@ export default defineBackground(() => {
           await clearTabIfUrlChanged(tabId, pageUrl);
         }
         await openOverlayOnTab(tabId);
-        // Let OverlayApp mount and attach BRIEF_* listeners
-        await new Promise((resolve) => setTimeout(resolve, 80));
         await startBriefForTab(tabId, { force: false, format });
       } catch (error) {
         console.error('Failed to vox page from context menu', error);
@@ -404,11 +414,7 @@ export default defineBackground(() => {
           sendResponse({ ok: true });
         } catch (error) {
           console.error('Failed to open Autovox options', error);
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error ? error.message : 'Could not open options',
-          });
+          sendResponse(errorResponse(error, 'Could not open options'));
         }
       })();
       return true;
@@ -420,13 +426,7 @@ export default defineBackground(() => {
           const status = await getManagedAccountStatus();
           sendResponse({ ok: true, status });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not load managed credits',
-          });
+          sendResponse(errorResponse(error, 'Could not load managed credits'));
         }
       })();
       return true;
@@ -438,13 +438,9 @@ export default defineBackground(() => {
           const status = await ensureManagedAccount();
           sendResponse({ ok: true, status });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not initialize managed listening',
-          });
+          sendResponse(
+            errorResponse(error, 'Could not initialize managed listening'),
+          );
         }
       })();
       return true;
@@ -457,13 +453,7 @@ export default defineBackground(() => {
           await browser.tabs.create({ url });
           sendResponse({ ok: true });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not start checkout',
-          });
+          sendResponse(errorResponse(error, 'Could not start checkout'));
         }
       })();
       return true;
@@ -473,7 +463,10 @@ export default defineBackground(() => {
       void (async () => {
         try {
           if (!isManagedConfigured()) {
-            throw new Error('Managed listening is not configured');
+            throw managedError(
+              'not_configured',
+              'Managed listening is not configured in this build',
+            );
           }
           if (sender.tab?.id == null) {
             throw new Error('Managed narration requires a browser tab');
@@ -484,13 +477,9 @@ export default defineBackground(() => {
           );
           sendResponse({ ok: true, ...managed });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not authorize managed narration',
-          });
+          sendResponse(
+            errorResponse(error, 'Could not authorize managed narration'),
+          );
         }
       })();
       return true;
@@ -513,13 +502,9 @@ export default defineBackground(() => {
           }
           sendResponse({ ok: true });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not report managed listening',
-          });
+          sendResponse(
+            errorResponse(error, 'Could not report managed listening'),
+          );
         }
       })();
       return true;
@@ -542,7 +527,11 @@ export default defineBackground(() => {
       void (async () => {
         const tabId = await resolveTabId(msg.tabId, sender.tab?.id);
         if (tabId == null) {
-          sendResponse({ ok: false, error: 'No active tab found.' });
+          sendResponse({
+            ok: false,
+            error: 'No active tab found.',
+            kind: 'fault',
+          } satisfies ErrorResponse);
           return;
         }
 
@@ -552,7 +541,8 @@ export default defineBackground(() => {
           sendResponse({
             ok: false,
             error: 'A briefing is already in progress on this page.',
-          });
+            kind: 'transient',
+          } satisfies ErrorResponse);
           return;
         }
 
