@@ -244,9 +244,8 @@ export function getLanguageName(code: OutputLanguage): string | null {
 /** Comprehension prompt guidance for the chosen output language. */
 export function comprehensionLanguageGuidance(code: OutputLanguage): string {
   if (code === 'auto') {
-    return `Write the entire news report in the same language as the source article.
-If the article mixes languages, use the dominant language.
-Do not translate into English unless the article is primarily in English.`;
+    return `Write the entire news report in the language the ARTICLE TEXT below is written in (its dominant language if it mixes several): an English article gets an English report, a Spanish article a Spanish report. Never switch to a language the article doesn't use.
+Every string in the JSON output must be in that language.`;
   }
 
   const name = LANGUAGE_NAMES[code];
