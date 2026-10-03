@@ -2,6 +2,7 @@ import './style.css';
 import './chalkboard.css';
 import ReactDOM from 'react-dom/client';
 import { OverlayApp } from '../../components/OverlayApp';
+import { watchCommittedUrl } from '../../utils/committedUrl';
 import { extractArticleFromDocument } from '../../utils/extract';
 import { enableShadowCopy } from '../../utils/shadowCopy';
 import { keepOnTop } from '../../utils/topLayer';
@@ -90,7 +91,13 @@ export default defineContentScript({
     };
 
     // SPA soft navigations keep this content script alive; drop the old player.
-    ctx.addEventListener(window, 'wxt:locationchange', removeUi);
+    const navigation = (globalThis as { navigation?: EventTarget }).navigation;
+    if (navigation) {
+      watchCommittedUrl(navigation, () => location.href, removeUi, ctx.signal);
+    } else {
+      // Without the Navigation API, WXT polls location.href, which only changes on commit.
+      ctx.addEventListener(window, 'wxt:locationchange', removeUi);
+    }
 
     browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       if (!message || typeof message !== 'object' || !('type' in message)) {
