@@ -1,5 +1,28 @@
+import type { ConvexError } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
+import { managedError, type ManagedErrorData } from "./errors";
+
+export function notAuthenticated(): ConvexError<ManagedErrorData> {
+  return managedError(
+    "not_authenticated",
+    "Sign in to Autovox to use managed listening.",
+  );
+}
+
+export function accountNotInitialized(): ConvexError<ManagedErrorData> {
+  return managedError(
+    "account_not_initialized",
+    "Your managed account isn't set up yet. Sign in again from Options.",
+  );
+}
+
+export function accountSuspended(): ConvexError<ManagedErrorData> {
+  return managedError(
+    "account_suspended",
+    "This managed account is suspended. Contact Autovox support.",
+  );
+}
 
 export async function requireIdentity(
   ctx: QueryCtx | MutationCtx,
@@ -11,7 +34,7 @@ export async function requireIdentity(
 }> {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) {
-    throw new Error("Not authenticated");
+    throw notAuthenticated();
   }
   return {
     tokenIdentifier: identity.tokenIdentifier,
@@ -25,18 +48,22 @@ export async function requireAccount(
   ctx: QueryCtx | MutationCtx,
 ): Promise<Doc<"accounts">> {
   const identity = await requireIdentity(ctx);
+  return await requireActiveAccount(ctx, identity.tokenIdentifier);
+}
+
+export async function requireActiveAccount(
+  ctx: QueryCtx | MutationCtx,
+  tokenIdentifier: string,
+): Promise<Doc<"accounts">> {
   const account = await ctx.db
     .query("accounts")
-    .withIndex("by_token", (q) =>
-      q.eq("tokenIdentifier", identity.tokenIdentifier),
-    )
+    .withIndex("by_token", (q) => q.eq("tokenIdentifier", tokenIdentifier))
     .unique();
-
   if (!account) {
-    throw new Error("Account not initialized");
+    throw accountNotInitialized();
   }
   if (account.status !== "active") {
-    throw new Error("Account is suspended");
+    throw accountSuspended();
   }
   return account;
 }

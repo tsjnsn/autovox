@@ -41,6 +41,11 @@ export const sessionKindValidator = v.union(
   v.literal("tts_replay"),
 );
 
+export const costSourceValidator = v.union(
+  v.literal("provider"),
+  v.literal("worst_case"),
+);
+
 export const faultStageValidator = v.union(
   v.literal("extract"),
   v.literal("understand"),

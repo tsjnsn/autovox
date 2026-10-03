@@ -24,10 +24,12 @@ interface EconomicsPulse {
 }
 
 const emptySnapshot: EconomicsSnapshot = {
-  snapshotVersion: 1,
+  snapshotVersion: 2,
   sinceDate: new Date().toISOString().slice(0, 10),
   daily: [],
+  killSwitch: { frozen: false },
   budget: null,
+  trialBudget: null,
 };
 
 const siteUrl =
@@ -205,11 +207,15 @@ function isNumber(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
 
+function isOptionalString(value: unknown): boolean {
+  return value === undefined || typeof value === "string";
+}
+
 function isEconomicsSnapshot(value: unknown): value is EconomicsSnapshot {
   const root = asRecord(value);
   if (
     !root ||
-    root.snapshotVersion !== 1 ||
+    root.snapshotVersion !== 2 ||
     typeof root.sinceDate !== "string" ||
     !Array.isArray(root.daily)
   ) {
@@ -231,12 +237,30 @@ function isEconomicsSnapshot(value: unknown): value is EconomicsSnapshot {
         record.creditsConsumed,
         record.grossRevenueMicroUsd,
         record.confirmedPayments,
-      ].every(isNumber)
+      ].every(isNumber) &&
+      [
+        record.chalkboardStarted,
+        record.chalkboardCompleted,
+        record.chalkboardProviderCostMicroUsd,
+        record.chalkboardCreditsConsumed,
+      ].every((field) => field === undefined || isNumber(field))
     );
   });
   if (!dailyValid) return false;
-  if (root.budget === null) return true;
-  const budget = asRecord(root.budget);
+  const killSwitch = asRecord(root.killSwitch);
+  if (
+    !killSwitch ||
+    typeof killSwitch.frozen !== "boolean" ||
+    !isOptionalString(killSwitch.reason)
+  ) {
+    return false;
+  }
+  return isBudgetWindow(root.budget) && isBudgetWindow(root.trialBudget);
+}
+
+function isBudgetWindow(value: unknown): boolean {
+  if (value === null) return true;
+  const budget = asRecord(value);
   return (
     budget !== null &&
     isNumber(budget.windowStart) &&
@@ -245,7 +269,6 @@ function isEconomicsSnapshot(value: unknown): value is EconomicsSnapshot {
     isNumber(budget.consumedMicroUsd) &&
     isNumber(budget.reservedMicroUsd) &&
     typeof budget.frozen === "boolean" &&
-    (budget.freezeReason === undefined ||
-      typeof budget.freezeReason === "string")
+    isOptionalString(budget.freezeReason)
   );
 }

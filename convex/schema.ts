@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import {
   accountRoleValidator,
   accountStatusValidator,
+  costSourceValidator,
   faultStageValidator,
   planKeyValidator,
   reportLengthValidator,
@@ -17,6 +18,7 @@ export default defineSchema({
     role: accountRoleValidator,
     status: accountStatusValidator,
     trialGranted: v.boolean(),
+    firstPurchaseAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_token", ["tokenIdentifier"]),
@@ -83,8 +85,11 @@ export default defineSchema({
     reservedCredits: v.number(),
     reservedMicroUsd: v.number(),
     budgetWindowStart: v.number(),
+    /** Also reserved against the "trial" budget window. Absent means false. */
+    trialFunded: v.optional(v.boolean()),
     reservationOpen: v.boolean(),
     actualMicroUsd: v.optional(v.number()),
+    costSource: v.optional(costSourceValidator),
     openRouterKeyHash: v.optional(v.string()),
     keyCleanupComplete: v.boolean(),
     keyExpiresAt: v.number(),
@@ -93,6 +98,7 @@ export default defineSchema({
     playbackSeconds: v.optional(v.number()),
     reconcileAttempts: v.number(),
     reconcileLeaseUntil: v.optional(v.number()),
+    nextReconcileAt: v.optional(v.number()),
     startedAt: v.number(),
     endedAt: v.optional(v.number()),
     reconciledAt: v.optional(v.number()),
@@ -108,7 +114,8 @@ export default defineSchema({
       "status",
       "keyCleanupComplete",
       "startedAt",
-    ]),
+    ])
+    .index("by_next_reconcile", ["nextReconcileAt"]),
 
   billingReceipts: defineTable({
     providerEventId: v.string(),
@@ -142,6 +149,10 @@ export default defineSchema({
     creditsConsumed: v.number(),
     grossRevenueMicroUsd: v.number(),
     confirmedPayments: v.number(),
+    chalkboardStarted: v.optional(v.number()),
+    chalkboardCompleted: v.optional(v.number()),
+    chalkboardProviderCostMicroUsd: v.optional(v.number()),
+    chalkboardCreditsConsumed: v.optional(v.number()),
     updatedAt: v.number(),
   }).index("by_date", ["date"]),
 });

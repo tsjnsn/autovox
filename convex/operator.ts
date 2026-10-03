@@ -1,5 +1,6 @@
 import { v } from "convex/values";
-import { internalQuery } from "./_generated/server";
+import { internalQuery, type QueryCtx } from "./_generated/server";
+import { utcDayWindow } from "./lib/economics";
 
 const dailyMetricValidator = v.object({
   date: v.string(),
@@ -13,26 +14,37 @@ const dailyMetricValidator = v.object({
   creditsConsumed: v.number(),
   grossRevenueMicroUsd: v.number(),
   confirmedPayments: v.number(),
+  chalkboardStarted: v.optional(v.number()),
+  chalkboardCompleted: v.optional(v.number()),
+  chalkboardProviderCostMicroUsd: v.optional(v.number()),
+  chalkboardCreditsConsumed: v.optional(v.number()),
 });
 
+const budgetWindowValidator = v.union(
+  v.object({
+    windowStart: v.number(),
+    windowEnd: v.number(),
+    capMicroUsd: v.number(),
+    consumedMicroUsd: v.number(),
+    reservedMicroUsd: v.number(),
+    frozen: v.boolean(),
+    freezeReason: v.optional(v.string()),
+  }),
+  v.null(),
+);
+
 export const snapshot = internalQuery({
-  args: { sinceDate: v.string() },
+  args: { sinceDate: v.string(), now: v.number() },
   returns: v.object({
-    snapshotVersion: v.literal(1),
+    snapshotVersion: v.literal(2),
     sinceDate: v.string(),
     daily: v.array(dailyMetricValidator),
-    budget: v.union(
-      v.object({
-        windowStart: v.number(),
-        windowEnd: v.number(),
-        capMicroUsd: v.number(),
-        consumedMicroUsd: v.number(),
-        reservedMicroUsd: v.number(),
-        frozen: v.boolean(),
-        freezeReason: v.optional(v.string()),
-      }),
-      v.null(),
-    ),
+    killSwitch: v.object({
+      frozen: v.boolean(),
+      reason: v.optional(v.string()),
+    }),
+    budget: budgetWindowValidator,
+    trialBudget: budgetWindowValidator,
   }),
   handler: async (ctx, args) => {
     const parsed = Date.parse(`${args.sinceDate}T00:00:00.000Z`);
@@ -48,20 +60,14 @@ export const snapshot = internalQuery({
       .withIndex("by_date", (q) => q.gte("date", args.sinceDate))
       .order("desc")
       .take(60);
-    const budget = await ctx.db
-      .query("budgetWindows")
-      .withIndex("by_scope_and_window", (q) =>
-        q.eq("scope", "production"),
-      )
-      .order("desc")
-      .first();
     const control = await ctx.db
       .query("controlState")
       .withIndex("by_key", (q) => q.eq("key", "production"))
       .unique();
+    const windowStart = utcDayWindow(args.now).start;
 
     return {
-      snapshotVersion: 1 as const,
+      snapshotVersion: 2 as const,
       sinceDate: args.sinceDate,
       daily: rows.reverse().map((row) => ({
         date: row.date,
@@ -75,18 +81,40 @@ export const snapshot = internalQuery({
         creditsConsumed: row.creditsConsumed,
         grossRevenueMicroUsd: row.grossRevenueMicroUsd,
         confirmedPayments: row.confirmedPayments,
+        chalkboardStarted: row.chalkboardStarted,
+        chalkboardCompleted: row.chalkboardCompleted,
+        chalkboardProviderCostMicroUsd: row.chalkboardProviderCostMicroUsd,
+        chalkboardCreditsConsumed: row.chalkboardCreditsConsumed,
       })),
-      budget: budget
-        ? {
-            windowStart: budget.windowStart,
-            windowEnd: budget.windowEnd,
-            capMicroUsd: budget.capMicroUsd,
-            consumedMicroUsd: budget.consumedMicroUsd,
-            reservedMicroUsd: budget.reservedMicroUsd,
-            frozen: budget.frozen || Boolean(control?.frozen),
-            freezeReason: control?.reason ?? budget.freezeReason,
-          }
-        : null,
+      killSwitch: control?.frozen
+        ? { frozen: true, reason: control.reason }
+        : { frozen: false },
+      budget: await currentWindow(ctx, "production", windowStart),
+      trialBudget: await currentWindow(ctx, "trial", windowStart),
     };
   },
 });
+
+async function currentWindow(
+  ctx: QueryCtx,
+  scope: "production" | "trial",
+  windowStart: number,
+) {
+  const window = await ctx.db
+    .query("budgetWindows")
+    .withIndex("by_scope_and_window", (q) =>
+      q.eq("scope", scope).eq("windowStart", windowStart),
+    )
+    .unique();
+  return window
+    ? {
+        windowStart: window.windowStart,
+        windowEnd: window.windowEnd,
+        capMicroUsd: window.capMicroUsd,
+        consumedMicroUsd: window.consumedMicroUsd,
+        reservedMicroUsd: window.reservedMicroUsd,
+        frozen: window.frozen,
+        freezeReason: window.freezeReason,
+      }
+    : null;
+}

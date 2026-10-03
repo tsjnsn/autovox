@@ -77,7 +77,10 @@ export const applyCheckout = internalMutation({
       sourceId: args.stripeObjectId,
       createdAt: args.now,
     });
-    await ctx.db.patch("accounts", accountId, { updatedAt: args.now });
+    await ctx.db.patch("accounts", accountId, {
+      firstPurchaseAt: account.firstPurchaseAt ?? args.now,
+      updatedAt: args.now,
+    });
     await addRevenueMetric(
       ctx,
       args.now,
@@ -223,6 +226,10 @@ async function addRevenueMetric(
     creditsConsumed: 0,
     grossRevenueMicroUsd: revenueDelta,
     confirmedPayments: paymentDelta,
+    chalkboardStarted: 0,
+    chalkboardCompleted: 0,
+    chalkboardProviderCostMicroUsd: 0,
+    chalkboardCreditsConsumed: 0,
     updatedAt: now,
   });
 }

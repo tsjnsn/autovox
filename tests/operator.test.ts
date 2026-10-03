@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   evaluateEconomics,
+  type BudgetWindowState,
   type EconomicsSnapshot,
 } from "../scripts/lib/operator";
 
@@ -9,9 +10,11 @@ function snapshot(
   overrides: Partial<EconomicsSnapshot["daily"][number]> = {},
 ): EconomicsSnapshot {
   return {
-    snapshotVersion: 1,
+    snapshotVersion: 2,
     sinceDate: "2026-09-01",
+    killSwitch: { frozen: false },
     budget: null,
+    trialBudget: null,
     daily: [
       {
         date: "2026-09-01",
@@ -31,21 +34,59 @@ function snapshot(
   };
 }
 
-void test("freezes before proposing product work", () => {
-  const input = snapshot({ sessionsStarted: 20, sessionsCompleted: 20 });
-  input.budget = {
+function window(overrides: Partial<BudgetWindowState> = {}): BudgetWindowState {
+  return {
     windowStart: 0,
     windowEnd: 1,
     capMicroUsd: 1_000_000,
-    consumedMicroUsd: 1_100_000,
+    consumedMicroUsd: 0,
     reservedMicroUsd: 0,
+    frozen: false,
+    ...overrides,
+  };
+}
+
+const healthy = {
+  sessionsStarted: 20,
+  sessionsCompleted: 18,
+  sessionsFaulted: 1,
+  sessionsAborted: 1,
+  confirmedPayments: 10,
+  grossRevenueMicroUsd: 90_000_000,
+  providerCostMicroUsd: 10_000_000,
+};
+
+void test("stops for a frozen current budget window before proposing product work", () => {
+  const input = snapshot({ sessionsStarted: 20, sessionsCompleted: 20 });
+  input.budget = window({
+    consumedMicroUsd: 1_100_000,
     frozen: true,
     freezeReason: "hard cap",
-  };
+  });
   const decision = evaluateEconomics(input);
   assert.equal(decision.objective, "freeze");
   assert.equal(decision.action, "stop");
+  assert.equal(decision.reason, "hard cap");
   assert.deepEqual(decision.allowedPaths, []);
+});
+
+void test("stops for the kill switch even when today's window is open", () => {
+  const input = snapshot(healthy);
+  input.killSwitch = { frozen: true, reason: "provider incident" };
+  input.budget = window();
+  const decision = evaluateEconomics(input);
+  assert.equal(decision.objective, "freeze");
+  assert.equal(decision.action, "stop");
+  assert.equal(decision.reason, "provider incident");
+});
+
+void test("a frozen trial pool alone does not stop the operator", () => {
+  const input = snapshot(healthy);
+  input.budget = window();
+  input.trialBudget = window({ frozen: true, freezeReason: "hard cap" });
+  const decision = evaluateEconomics(input);
+  assert.equal(decision.objective, "hold");
+  assert.equal(decision.action, "hold");
 });
 
 void test("prioritizes paid conversion after ten unpaid trials", () => {
@@ -76,13 +117,11 @@ void test("prioritizes reliability before margin", () => {
 void test("holds when ten payments are healthy", () => {
   const decision = evaluateEconomics(
     snapshot({
-      sessionsStarted: 20,
-      sessionsCompleted: 18,
-      sessionsFaulted: 1,
-      sessionsAborted: 1,
-      confirmedPayments: 10,
-      grossRevenueMicroUsd: 90_000_000,
-      providerCostMicroUsd: 10_000_000,
+      ...healthy,
+      chalkboardStarted: 4,
+      chalkboardCompleted: 4,
+      chalkboardProviderCostMicroUsd: 200_000,
+      chalkboardCreditsConsumed: 4,
     }),
   );
   assert.equal(decision.objective, "hold");
