@@ -20,6 +20,7 @@ import {
 } from '../utils/managed';
 import type { LlmAuth } from '../utils/auth';
 import type { SessionFormat } from '../utils/chalk/types';
+import { briefErrorKind, errorMessage } from '../utils/errors';
 import type { BriefProgress, ExtensionMessage } from '../utils/types';
 
 const CONTEXT_MENU_VOX_PAGE = 'autovox-vox-page';
@@ -267,23 +268,23 @@ async function startBriefForTab(
       notifyTab(tabId, { type: 'BRIEF_RESET' });
       return { ok: false, error: 'Briefing aborted' };
     }
-    const errorMessage =
-      error instanceof Error ? error.message : 'Briefing failed';
+    const errorText = errorMessage(error, 'Briefing failed');
     await setTabProgress(
       tabId,
       pageUrl,
       {
         phase: 'error',
         message: 'Error',
-        detail: errorMessage,
+        detail: errorText,
       },
       false,
     );
     notifyTab(tabId, {
       type: 'BRIEF_ERROR',
-      error: errorMessage,
+      error: errorText,
+      kind: briefErrorKind(error),
     });
-    return { ok: false, error: errorMessage };
+    return { ok: false, error: errorText };
   }
 }
 

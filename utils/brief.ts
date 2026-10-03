@@ -33,6 +33,7 @@ import {
   draftText,
   LESSON_DRAFT_KEYS,
 } from './draft';
+import { PageError, SetupError } from './errors';
 import { languageFromDetection, type OutputLanguage } from './languages';
 import type { StreamProgress } from './openai';
 import { getSettings } from './storage';
@@ -67,17 +68,25 @@ async function pingContentScript(tabId: number): Promise<boolean> {
 export async function ensureContentScript(tabId: number): Promise<void> {
   if (await pingContentScript(tabId)) return;
 
-  await browser.scripting.executeScript({
-    target: { tabId },
-    files: ['/content-scripts/content.js'],
-  });
+  try {
+    await browser.scripting.executeScript({
+      target: { tabId },
+      files: ['/content-scripts/content.js'],
+    });
+  } catch (error) {
+    throw new PageError(
+      error instanceof Error
+        ? error.message
+        : 'Content script failed to load on this page.',
+    );
+  }
 
   for (let attempt = 0; attempt < 8; attempt++) {
     if (await pingContentScript(tabId)) return;
     await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
   }
 
-  throw new Error('Content script failed to load on this page.');
+  throw new PageError('Content script failed to load on this page.');
 }
 
 async function extractFromTab(tabId: number): Promise<ExtractedArticle> {
@@ -87,7 +96,7 @@ async function extractFromTab(tabId: number): Promise<ExtractedArticle> {
   })) as { ok: true; article: ExtractedArticle } | { ok: false; error: string };
 
   if (!response?.ok) {
-    throw new Error(
+    throw new PageError(
       response && 'error' in response
         ? response.error
         : 'Could not extract article from this page',
@@ -151,7 +160,7 @@ export async function runBriefPipeline(
   const expectedUrl = normalizePageUrl(pageUrl);
   const settings = await getSettings();
   if (!hasLlmAuth(settings)) {
-    throw new Error(
+    throw new SetupError(
       'Connect with OpenRouter or add an OpenAI API key in Options before briefing a page.',
     );
   }

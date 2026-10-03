@@ -5,6 +5,7 @@ import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
 import { samePageUrl } from '../utils/briefState';
 import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../utils/auth';
+import { errorMeterLabel, type BriefErrorKind } from '../utils/errors';
 import {
   addMoneyLine,
   finishMoneySession,
@@ -64,23 +65,15 @@ function withScenes(
   return { ...result, drawings };
 }
 
+type BriefFault = { message: string; kind: BriefErrorKind };
+
 /** Short meter labels only — no idle instructional copy, no long headlines. */
 function meterLabel(
   phase: BriefPhase,
-  error: string,
+  fault: BriefFault | null,
   extracting: boolean,
 ): string {
-  if (error) {
-    const lower = error.toLowerCase();
-    if (
-      lower.includes('api key') ||
-      lower.includes('connect') ||
-      lower.includes('provider')
-    ) {
-      return 'Needs setup';
-    }
-    return 'Fault';
-  }
+  if (fault) return errorMeterLabel(fault.kind);
   if (extracting) {
     switch (phase) {
       case 'extracting':
@@ -103,7 +96,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   const [sourceWords, setSourceWords] = useState<number | null>(null);
   const [draft, setDraft] = useState<BriefDraft | null>(null);
   const [result, setResult] = useState<BriefResult | null>(null);
-  const [error, setError] = useState('');
+  const [fault, setFault] = useState<BriefFault | null>(null);
   const [streamKey, setStreamKey] = useState(0);
   const [narrating, setNarrating] = useState(false);
   const [managedPlayerAuth, setManagedPlayerAuth] =
@@ -121,8 +114,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   hasScriptRef.current = Boolean(result);
   const moneySessionRef = useRef<string | null>(null);
   const settingsRef = useRef<Settings | null>(null);
+  const faultRef = useRef<BriefFault | null>(null);
   const managedRuntimeSessionRef = useRef<string | null>(null);
   settingsRef.current = settings;
+  faultRef.current = fault;
 
   useEffect(() => {
     moneySessionRef.current = result?.moneySessionId ?? null;
@@ -157,7 +152,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       if (cancelled) return;
       if (!response.ok || !response.sessionId || !response.auth) {
         setManagedPlayerAuth(null);
-        setError(response.error ?? 'Managed listening is unavailable');
+        setFault({
+          message: response.error ?? 'Managed listening is unavailable',
+          kind: 'fault',
+        });
         setPhase('error');
         setNarrating(false);
         return;
@@ -344,7 +342,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       setTimeline(EMPTY_TIMELINE);
       setResult(null);
       setPhase('idle');
-      setError('');
+      setFault(null);
       setExtracting(false);
       setSourceWords(null);
       setDraft(null);
@@ -396,7 +394,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           return;
         }
         setPhase(message.progress.phase);
-        setError('');
+        setFault(null);
         setSourceWords(message.progress.sourceWords ?? null);
         if (message.progress.phase === 'extracting') setDraft(null);
         if (
@@ -429,7 +427,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         setPhase('generating_audio');
         setExtracting(false);
         setNarrating(true);
-        setError('');
+        setFault(null);
         setStreamKey((k) => k + 1);
       }
       if (message.type === 'CHALK_SCENE_READY') {
@@ -444,7 +442,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       }
       if (message.type === 'BRIEF_ERROR') {
         setPhase('error');
-        setError(message.error);
+        setFault({ message: message.error, kind: message.kind });
         setExtracting(false);
         setDraft(null);
         setNarrating(false);
@@ -458,18 +456,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       if (!changes.autovoxSettings) return;
       void getSettings().then((loaded) => {
         setSettings(loaded);
-        if (hasLlmAuth(loaded)) {
-          setError((prev) => {
-            const lower = prev.toLowerCase();
-            if (
-              lower.includes('api key') ||
-              lower.includes('connect') ||
-              lower.includes('provider')
-            ) {
-              return '';
-            }
-            return prev;
-          });
+        if (hasLlmAuth(loaded) && faultRef.current?.kind === 'setup') {
+          setFault(null);
           setPhase((prev) => (prev === 'error' ? 'idle' : prev));
         }
       });
@@ -491,12 +479,15 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     const latest = await getSettings();
     setSettings(latest);
     if (!hasLlmAuth(latest)) {
-      setError('Connect with OpenRouter or add an OpenAI API key in Options first.');
+      setFault({
+        message: 'Connect with OpenRouter or add an OpenAI API key in Options first.',
+        kind: 'setup',
+      });
       setPhase('error');
       return;
     }
 
-    setError('');
+    setFault(null);
     moneySessionRef.current = null;
     managedRuntimeSessionRef.current = null;
     setManagedPlayerAuth(null);
@@ -517,7 +508,10 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     if (!response?.ok) {
       setExtracting(false);
       setPhase('error');
-      setError(response?.error ?? 'Could not start briefing');
+      setFault({
+        message: response?.error ?? 'Could not start briefing',
+        kind: 'fault',
+      });
     }
   };
 
@@ -530,7 +524,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     handleNarration(null);
     setResult(null);
     setPhase('idle');
-    setError('');
+    setFault(null);
     setExtracting(false);
     setSourceWords(null);
     setDraft(null);
@@ -550,10 +544,14 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     void reportManagedPlayback({ type: 'completed', playbackSeconds });
   }, [finishTtsSession, reportManagedPlayback]);
 
-  const handleError = useCallback((message: string, playbackSeconds: number) => {
+  const handleError = useCallback((
+    message: string,
+    playbackSeconds: number,
+    kind: BriefErrorKind,
+  ) => {
     setPhase('error');
     setNarrating(false);
-    setError(message);
+    setFault({ message, kind });
     void finishTtsSession('fault', 'tts');
     void reportManagedPlayback({
       type: 'fault',
@@ -574,7 +572,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
   );
 
   const label =
-    hasAuth === false ? 'Needs setup' : meterLabel(phase, error, extracting);
+    hasAuth === false ? 'Needs setup' : meterLabel(phase, fault, extracting);
 
   return (
     <div className={`autovox-card${lesson ? ' autovox-card--board' : ''}`}>
@@ -632,8 +630,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           <BriefMeter
             working={extracting}
             label={label}
-            error={error}
-            labelIsError={Boolean(error) || hasAuth === false}
+            error={fault?.message ?? ''}
+            labelIsError={Boolean(fault) || hasAuth === false}
             playDisabled={busy || hasAuth === false}
             playLabel={
               result?.format === 'chalkboard'

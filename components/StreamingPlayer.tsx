@@ -6,6 +6,11 @@ import {
   type MutableRefObject,
 } from 'react';
 import { authCacheKey, type LlmAuth } from '../utils/auth';
+import {
+  briefErrorKind,
+  errorMeterLabel,
+  type BriefErrorKind,
+} from '../utils/errors';
 import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from '../utils/openai';
 import {
   concatPcmChunks,
@@ -29,7 +34,11 @@ interface StreamingPlayerProps {
   autoPlay?: boolean;
   onPlaying?: () => void;
   onDone?: (playbackSeconds: number) => void;
-  onError?: (message: string, playbackSeconds: number) => void;
+  onError?: (
+    message: string,
+    playbackSeconds: number,
+    kind: BriefErrorKind,
+  ) => void;
   onAbort?: (playbackSeconds: number) => void;
   /** Fired once per TTS API segment that actually spent. Cache replay does not fire. */
   onUsage?: (usage: ProviderUsage) => void | Promise<void>;
@@ -142,6 +151,7 @@ export function StreamingPlayer({
   const [phase, setPhase] = useState<TransportPhase>('loading');
   const [needsGesture, setNeedsGesture] = useState(false);
   const [error, setError] = useState('');
+  const [errorKind, setErrorKind] = useState<BriefErrorKind>('fault');
   const [volume, setVolume] = useState(0.85);
   const [volumeDragging, setVolumeDragging] = useState(false);
   const [canScrub, setCanScrub] = useState(false);
@@ -466,11 +476,13 @@ export function StreamingPlayer({
       clearCache();
       const message =
         err instanceof Error ? err.message : 'Failed to stream audio';
+      const kind = briefErrorKind(err);
       const playbackSeconds = player.getCurrentTime();
       setError(message);
+      setErrorKind(kind);
       setTransportPhase('ready');
       terminalRef.current = true;
-      onErrorRef.current?.(message, playbackSeconds);
+      onErrorRef.current?.(message, playbackSeconds, kind);
       player.resetPlayback();
     }
   }, [
@@ -605,7 +617,7 @@ export function StreamingPlayer({
     duration > 0 ? Math.min(1, Math.max(0, bufferedSeconds / duration)) : 0;
 
   const label = error
-    ? 'Fault'
+    ? errorMeterLabel(errorKind)
     : needsGesture
       ? 'Play'
       : phase === 'loading' && !canScrub

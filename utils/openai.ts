@@ -23,6 +23,14 @@ export class OpenAIError extends Error {
   }
 }
 
+/** Errors inside an accepted stream carry a provider code instead of an HTTP status. */
+function streamErrorStatus(code: unknown): number | undefined {
+  if (typeof code === 'number') return code;
+  if (code === 'rate_limit_exceeded') return 429;
+  if (code === 'server_error') return 502;
+  return undefined;
+}
+
 /** OpenRouter wraps upstream failures as "Provider returned error" with the detail in metadata. */
 function upstreamDetail(metadata: unknown): string {
   if (metadata === null || typeof metadata !== 'object') return '';
@@ -117,8 +125,11 @@ async function readResponsesStream(
       ) {
         final = event.response ?? null;
       } else if (type === 'error') {
-        const error = event.error as { message?: string } | undefined;
-        throw new OpenAIError(error?.message ?? 'Stream error');
+        const error = event.error as { message?: string; code?: unknown } | undefined;
+        throw new OpenAIError(
+          error?.message ?? 'Stream error',
+          streamErrorStatus(error?.code ?? event.code),
+        );
       } else {
         continue;
       }
@@ -342,7 +353,7 @@ export async function* streamAudioChatPcm(options: {
         if (!payload || payload === '[DONE]') continue;
 
         let event: {
-          error?: { message?: string };
+          error?: { message?: string; code?: unknown };
           choices?: Array<{
             delta?: {
               audio?: { data?: string };
@@ -358,7 +369,10 @@ export async function* streamAudioChatPcm(options: {
         usage = mergeStreamUsage(usage, event);
 
         if (event.error?.message) {
-          throw new OpenAIError(event.error.message);
+          throw new OpenAIError(
+            event.error.message,
+            streamErrorStatus(event.error.code),
+          );
         }
 
         const audioB64 = event.choices?.[0]?.delta?.audio?.data;

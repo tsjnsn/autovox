@@ -107,6 +107,13 @@ Options · Clear          (after script ready)
 
 No logo subtitle. No voice select. No separate Brief button. No Stop. No volume row: the speaker mutes, and its slider only opens on hover or focus, as on YouTube.
 
+A failure puts one of four labels on the meter, in danger ink. It says what the listener can do; the provider's wording never reaches the faceplate.
+
+- `Needs setup`: no usable key or sign-in, or the provider refused the key. Fixed in Options; changing settings clears it.
+- `No credits`: the provider account or Autovox credits ran out.
+- `Retry`: rate limit, outage, dropped network, or managed listening paused for now. Play again later.
+- `Fault`: anything else, including a page with no readable text.
+
 While the script is written (brief or chalkboard), the row reads as a wire printer:
 
 ```
