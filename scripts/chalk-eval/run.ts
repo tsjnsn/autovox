@@ -8,21 +8,27 @@
  *   pnpm eval:chalk --drawers anthropic/claude-opus-5.5,openai/gpt-6-luna --skip-writing --plan-file .eval/chalk/<run>/results.json
  *   pnpm eval:chalk --extend .eval/chalk/<run> --writers z-ai/glm-5.3 --drawers z-ai/glm-5.3
  *       (copies the run, adds those models on the same page and lesson, re-judges everyone together)
- *   pnpm eval:chalk --judge-only .eval/chalk/<run> --judge-passes 2
+ *   pnpm eval:chalk --judge-only .eval/chalk/<run> --judge-passes 3
  *   pnpm eval:chalk --render-only .eval/chalk/<run>
+ *   pnpm eval:chalk --compare-renderer .eval/chalk/<run> --drawers anthropic/claude-opus-5.5,openai/gpt-6-luna
+ *       (re-renders that run's drawings with today's renderer; the judge scores them beside its saved boards)
+ *   pnpm eval:chalk --page .eval/pages/tutorial-git-rebase.json
+ *       (pages are ExtractedArticle JSON; keep a mix of news, tutorials and other languages)
+ *
+ * The judge scores everything twice by default, in fresh random orders, to average out its noise.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { build } from 'vite';
 import type { LlmAuth } from '../../utils/auth';
-import { drawLessonScenes, drawScene } from '../../utils/chalk/draw';
+import { drawLessonScenes, drawScene, dropRepeats } from '../../utils/chalk/draw';
 import { planLesson } from '../../utils/chalk/lesson';
 import type { ChalkLesson } from '../../utils/chalk/types';
 import type { ExtractedArticle, ReportLength } from '../../utils/types';
 import type { ProviderUsage } from '../../utils/usage';
-import { exportBoardImages, judgeEval } from './judge';
+import { boardKey, exportBoardImages, judgeEval } from './judge';
 import { parseOpenRouterModels } from '../../utils/models';
 import { lessonMetrics, sceneMetrics } from './metrics';
 import {
@@ -186,6 +192,20 @@ async function runDrawing(
     clearInterval(ticker);
   }
   return { model, rep, ms: performance.now() - start, spend, scenes };
+}
+
+/** Re-applies today's repeat filter and metrics to saved (already sanitized) boards, so re-renders measure today's renderer. */
+function refreshDrawings(results: EvalResults): void {
+  const lesson = results.reference?.lesson;
+  if (!lesson) return;
+  for (const run of results.drawing) {
+    run.scenes.forEach((scene, index) => {
+      const beats = lesson.scenes[index]?.beats.length;
+      if (!scene.drawing || beats === undefined) return;
+      scene.drawing = { elements: dropRepeats(scene.drawing.elements) };
+      scene.metrics = sceneMetrics(scene.drawing, index, beats);
+    });
+  }
 }
 
 async function renderViewer(outDir: string, results: EvalResults): Promise<string> {
@@ -382,6 +402,117 @@ function printJudging(results: EvalResults): void {
   }
 }
 
+/** A run's exported board images (boards/<run>-<scene>.png) as data URLs keyed like the judge's boards. */
+function readBoardImages(dir: string): Map<string, string> {
+  const boards = new Map<string, string>();
+  const boardsDir = resolve(dir, 'boards');
+  if (!existsSync(boardsDir)) return boards;
+  for (const file of readdirSync(boardsDir)) {
+    const match = /^(\d+)-(\d+)\.png$/.exec(file);
+    if (!match) continue;
+    const data = readFileSync(resolve(boardsDir, file)).toString('base64');
+    boards.set(boardKey(Number(match[1]), Number(match[2])), `data:image/png;base64,${data}`);
+  }
+  return boards;
+}
+
+/**
+ * Renderer A/B: re-renders a saved run's drawings with today's renderer and
+ * has the judge score them blind beside the images saved with that run, in
+ * the same calls. The source run is left untouched.
+ */
+async function compareRenderers(options: {
+  auth: LlmAuth;
+  source: string;
+  out: string | undefined;
+  drawers: string[];
+  /** Null renders the new boards without judging. */
+  judgeModel: string | null;
+  passes: number;
+}): Promise<void> {
+  const source = resolve(ROOT, options.source);
+  const results = JSON.parse(readFileSync(resolve(source, 'results.json'), 'utf8')) as EvalResults;
+  const before = readBoardImages(source);
+  if (before.size === 0) throw new Error(`${options.source} has no saved board images to compare against`);
+  const keep = results.drawing
+    .map((run, index) => ({ run, index }))
+    .filter(({ run }) => options.drawers.length === 0 || options.drawers.includes(run.model));
+  if (keep.length === 0) throw new Error('No drawing runs match --drawers');
+
+  const outDir = resolve(ROOT, options.out ?? `.eval/chalk/${stamp()}-renderer-ab`);
+  mkdirSync(outDir, { recursive: true });
+  results.createdAt = new Date().toISOString();
+  delete results.judging;
+  results.writing = [];
+  results.drawing = keep.map(({ run }) => run);
+  refreshDrawings(results);
+  writeFileSync(resolve(outDir, 'results.json'), `${JSON.stringify(results, null, 2)}\n`);
+  await renderViewer(outDir, results);
+  console.log('Rendering boards with the current renderer…');
+  const boards = await exportBoardImages(outDir);
+  if (!options.judgeModel) {
+    console.log(`Boards: ${relative(ROOT, resolve(outDir, 'boards'))} (compare with ${relative(ROOT, resolve(source, 'boards'))})`);
+    return;
+  }
+
+  const count = results.drawing.length;
+  const scenes = results.reference?.lesson.scenes.length ?? 0;
+  keep.forEach(({ index }, i) => {
+    for (let scene = 0; scene < scenes; scene++) {
+      const image = before.get(boardKey(index, scene));
+      if (image) boards.set(boardKey(i + count, scene), image);
+    }
+  });
+  const judged: EvalResults = {
+    ...results,
+    drawing: [...results.drawing, ...results.drawing.map((run) => ({ ...run, model: `${run.model} (before)` }))],
+  };
+  judged.judging = await judgeEval({
+    auth: options.auth,
+    model: options.judgeModel,
+    passes: options.passes,
+    results: judged,
+    article: null,
+    boards,
+    log: (line) => console.log(line),
+  });
+  writeFileSync(resolve(outDir, 'renderer-ab.json'), `${JSON.stringify(judged.judging, null, 2)}\n`);
+  printJudging(judged);
+  printRendererDelta(judged, count);
+  console.log(`\nResults: ${relative(ROOT, resolve(outDir, 'renderer-ab.json'))}`);
+}
+
+/** Per drawing: today's render minus the saved one, paired within each judge call. */
+function printRendererDelta(judged: EvalResults, count: number): void {
+  const calls = judged.judging?.drawing.filter((call) => !call.error) ?? [];
+  const mean = (scores: Record<string, number>) =>
+    DRAW_CRITERIA.reduce((sum, c) => sum + (scores[c] ?? 0), 0) / DRAW_CRITERIA.length;
+  const byCriterion = Object.fromEntries(DRAW_CRITERIA.map((c) => [c, 0])) as Record<string, number>;
+  let pairs = 0;
+  console.log('\nRenderer A/B, same drawings (after − before, overall /10; times "after" ranked higher):');
+  for (let i = 0; i < count; i++) {
+    let delta = 0;
+    let n = 0;
+    let wins = 0;
+    for (const call of calls) {
+      const after = call.entries.find((entry) => entry.run === i);
+      const before = call.entries.find((entry) => entry.run === i + count);
+      if (!after || !before) continue;
+      n += 1;
+      delta += mean(after.scores) - mean(before.scores);
+      if (after.rank < before.rank) wins += 1;
+      for (const c of DRAW_CRITERIA) byCriterion[c] = (byCriterion[c] ?? 0) + after.scores[c] - before.scores[c];
+    }
+    pairs += n;
+    const sign = delta >= 0 ? '+' : '';
+    console.log(`  ${n ? `${sign}${(delta / n).toFixed(2)}` : '  n/a'}  ${wins}/${n}  ${judged.drawing[i]!.model}`);
+  }
+  if (pairs > 0) {
+    const parts = DRAW_CRITERIA.map((c) => `${c} ${((byCriterion[c] ?? 0) / pairs >= 0 ? '+' : '')}${((byCriterion[c] ?? 0) / pairs).toFixed(2)}`);
+    console.log(`  All ${pairs} pairs: ${parts.join(' · ')}`);
+  }
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     options: {
@@ -395,9 +526,10 @@ async function main(): Promise<void> {
       length: { type: 'string', default: 'standard' },
       out: { type: 'string' },
       judge: { type: 'string', default: DEFAULT_JUDGE },
-      'judge-passes': { type: 'string', default: '1' },
+      'judge-passes': { type: 'string', default: '2' },
       'judge-only': { type: 'string' },
       'render-only': { type: 'string' },
+      'compare-renderer': { type: 'string' },
       extend: { type: 'string' },
     },
   });
@@ -406,6 +538,7 @@ async function main(): Promise<void> {
     const dir = resolve(ROOT, values['render-only']);
     const resultsFile = resolve(dir, 'results.json');
     const results = JSON.parse(readFileSync(resultsFile, 'utf8')) as EvalResults;
+    refreshDrawings(results);
     await ensurePrices(results);
     writeFileSync(resultsFile, `${JSON.stringify(results, null, 2)}\n`);
     printCosts(results);
@@ -418,6 +551,18 @@ async function main(): Promise<void> {
   const judgeModel = values.judge === 'none' ? null : values.judge;
   const judgePasses = Math.max(1, Number.parseInt(values['judge-passes'], 10) || 1);
 
+  if (values['compare-renderer']) {
+    await compareRenderers({
+      auth,
+      source: values['compare-renderer'],
+      out: values.out,
+      drawers: list(values.drawers, []),
+      judgeModel,
+      passes: judgePasses,
+    });
+    return;
+  }
+
   let outDir: string;
   let results: EvalResults;
   let article: ExtractedArticle | null;
@@ -425,6 +570,7 @@ async function main(): Promise<void> {
   if (values['judge-only']) {
     outDir = resolve(ROOT, values['judge-only']);
     results = JSON.parse(readFileSync(resolve(outDir, 'results.json'), 'utf8')) as EvalResults;
+    refreshDrawings(results);
     const pagePath = results.page.path ? resolve(ROOT, results.page.path) : null;
     article =
       pagePath && existsSync(pagePath)

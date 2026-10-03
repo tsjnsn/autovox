@@ -494,6 +494,32 @@ void test("sanitizeDrawing clamps beats and stable-sorts by beat", () => {
   assert.equal(sanitizeDrawing({ elements: [el({ text: "x", beat: 4 })] }, 0).elements[0]?.beat, 0);
 });
 
+void test("sanitizeDrawing drops elements that redraw what is already there", () => {
+  const { elements } = sanitizeDrawing(
+    {
+      elements: [
+        el({ kind: "figure", x: 300, y: 520, text: "Mia", beat: 0 }),
+        el({ text: "Price: $5", x: 600, y: 150, size: 30, beat: 0 }),
+        el({ kind: "box", x: 100, y: 200, x2: 300, y2: 300, text: "Shop", beat: 0 }),
+        // Unchanged repeats: a nudged figure, the same caption, the same box.
+        el({ kind: "figure", x: 306, y: 520, text: "Mia", beat: 1 }),
+        el({ text: "Price: $5", x: 602, y: 151, size: 30, beat: 1 }),
+        el({ kind: "box", x: 100, y: 200, x2: 300, y2: 300, text: "Shop", beat: 2 }),
+        // Changes in place are kept (they replace what was there).
+        el({ kind: "figure", x: 300, y: 520, text: "Mia", pose: "arms_up", beat: 1 }),
+        el({ text: "Price: $8", x: 600, y: 150, size: 30, beat: 2 }),
+        // Bringing back the old caption after it changed is a change too.
+        el({ text: "Price: $5", x: 600, y: 150, size: 30, beat: 2 }),
+      ],
+    },
+    3,
+  );
+  assert.deepEqual(
+    elements.map((e) => `${e.beat}:${e.kind}:${e.kind === "figure" ? e.pose : e.kind === "text" ? e.text : ""}`),
+    ["0:figure:stand", "0:text:Price: $5", "0:box:", "1:figure:arms_up", "2:text:Price: $8", "2:text:Price: $5"],
+  );
+});
+
 void test("sanitizeDrawing caps the element count after sorting", () => {
   const raw = Array.from({ length: 50 }, (_, i) =>
     el({ text: `t${i}`, beat: i < 25 ? 1 : 0 }),

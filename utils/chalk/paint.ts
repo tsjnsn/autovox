@@ -12,7 +12,8 @@ import {
   type StrokeOp,
   type TextOp,
 } from './geometry';
-import type { SceneReveal } from './timeline';
+import type { Box } from './layout';
+import { replaceReveal, type SceneReveal } from './timeline';
 import { BOARD_HEADING_BAND, BOARD_HEIGHT, BOARD_WIDTH, CHALK_COLORS, type ChalkColor } from './types';
 
 export const BOARD_COLOR = '#1f2d27';
@@ -292,6 +293,29 @@ export function paintEraser(
   ctx.restore();
 }
 
+/** Eraser swipes over one element's spot, laid down as `amount` goes 0 → 1. */
+export function paintSmudge(ctx: CanvasRenderingContext2D, box: Box | null, amount: number, seed: number): void {
+  if (!box || !(amount > 0)) return;
+  const rng = mulberry32(seed);
+  const x0 = box.x0 - 8;
+  const x1 = box.x1 + 8;
+  const h = box.y1 - box.y0 + 16;
+  const swipes = Math.max(2, Math.min(6, Math.round(h / 40)));
+  ctx.save();
+  ctx.lineCap = 'round';
+  ctx.lineWidth = (h / swipes) * 1.3;
+  for (let k = 0; k < swipes && k / swipes < amount; k++) {
+    const y = box.y0 - 8 + ((k + 0.5) * h) / swipes;
+    const end = x0 + (x1 - x0) * Math.min(1, (amount - k / swipes) * swipes);
+    ctx.strokeStyle = `rgba(230,236,230,${0.007 + rng() * 0.005})`;
+    ctx.beginPath();
+    ctx.moveTo(x0, y + (rng() - 0.5) * 6);
+    ctx.lineTo(end, y + (rng() - 0.5) * 6);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------- chalk marks
 
 function tracePath(ctx: CanvasRenderingContext2D, pts: readonly [number, number][], dx: number, dy: number): void {
@@ -307,19 +331,20 @@ function paintStroke(
   styles: ChalkStyles | null,
   op: StrokeOp,
   fraction: number,
+  fade: number,
 ): PenState | null {
   const pts = fraction >= 1 ? op.points : truncatePolyline(op.points, fraction);
   const last = pts[pts.length - 1];
   if (!last) return null;
   ctx.strokeStyle = styles?.[op.color] ?? CHALK_HEX[op.color];
   ctx.lineWidth = STROKE_WIDTH * op.weight;
-  ctx.globalAlpha = 0.88 * op.alpha;
+  ctx.globalAlpha = 0.88 * op.alpha * fade;
   tracePath(ctx, pts, 0, 0);
   ctx.stroke();
   // Thin offset pass for grain.
   ctx.strokeStyle = CHALK_HEX[op.color];
   ctx.lineWidth = 1.3 * op.weight;
-  ctx.globalAlpha = 0.3 * op.alpha;
+  ctx.globalAlpha = 0.3 * op.alpha * fade;
   tracePath(ctx, pts, 0.9, -0.7);
   ctx.stroke();
   ctx.globalAlpha = 1;
@@ -333,6 +358,7 @@ function paintText(
   styles: ChalkStyles | null,
   op: TextOp,
   fraction: number,
+  fade: number,
 ): PenState {
   ctx.font = `${op.size}px ${op.font === 'mono' ? MONO_FONT : HAND_FONT}`;
   let full = textWidths.get(op);
@@ -356,10 +382,10 @@ function paintText(
     ctx.translate(left, op.y);
     if (sx !== 1) ctx.scale(sx, 1);
     ctx.fillStyle = styles?.[op.color] ?? CHALK_HEX[op.color];
-    ctx.globalAlpha = 0.92 * op.alpha;
+    ctx.globalAlpha = 0.92 * op.alpha * fade;
     ctx.fillText(shown, 0, 0);
     ctx.fillStyle = CHALK_HEX[op.color];
-    ctx.globalAlpha = 0.18 * op.alpha;
+    ctx.globalAlpha = 0.18 * op.alpha * fade;
     ctx.fillText(shown, 0.8, 0.6);
     if (shown !== op.text) penX = left + ctx.measureText(shown).width * sx;
     ctx.restore();
@@ -369,29 +395,39 @@ function paintText(
   return { x: penX, y: op.y + op.size * 0.3, color: op.color };
 }
 
-function paintOp(ctx: CanvasRenderingContext2D, styles: ChalkStyles | null, op: PaintOp, fraction: number): PenState | null {
-  return op.type === 'stroke' ? paintStroke(ctx, styles, op, fraction) : paintText(ctx, styles, op, fraction);
+function paintOp(
+  ctx: CanvasRenderingContext2D,
+  styles: ChalkStyles | null,
+  op: PaintOp,
+  fraction: number,
+  fade: number,
+): PenState | null {
+  return op.type === 'stroke'
+    ? paintStroke(ctx, styles, op, fraction, fade)
+    : paintText(ctx, styles, op, fraction, fade);
 }
 
 /**
  * Paints the prefix of `ops` covering `fraction` of their ink (partial last
- * stroke by arc length, partial text by characters). Returns where the chalk
- * is while drawing, or null when nothing or everything is drawn.
+ * stroke by arc length, partial text by characters), at `fade` opacity.
+ * Returns where the chalk is while drawing, or null when nothing or
+ * everything is drawn.
  */
 export function paintOps(
   ctx: CanvasRenderingContext2D,
   styles: ChalkStyles | null,
   ops: readonly PaintOp[],
   fraction: number,
+  fade = 1,
 ): PenState | null {
-  if (!(fraction > 0)) return null;
+  if (!(fraction > 0) || !(fade > 0)) return null;
   if (fraction >= 1) {
-    for (const op of ops) paintOp(ctx, styles, op, 1);
+    for (const op of ops) paintOp(ctx, styles, op, 1, fade);
     return null;
   }
   let pen: PenState | null = null;
   for (const slice of revealSlices(ops, fraction).slices) {
-    pen = paintOp(ctx, styles, slice.op, slice.fraction) ?? pen;
+    pen = paintOp(ctx, styles, slice.op, slice.fraction, fade) ?? pen;
   }
   return pen;
 }
@@ -411,10 +447,16 @@ export function paintPen(ctx: CanvasRenderingContext2D, pen: PenState): void {
   ctx.restore();
 }
 
-function paintLayerFinished(ctx: CanvasRenderingContext2D, styles: ChalkStyles | null, layer: BoardLayer): void {
+const smudgeSeed = (scene: number, element: number) => chalkSeed(scene, 5000 + element);
+
+/** A scene's board as it ends: replaced elements leave only eraser smudges. */
+export function paintLayerFinished(ctx: CanvasRenderingContext2D, styles: ChalkStyles | null, layer: BoardLayer): void {
   paintOps(ctx, styles, layer.heading, 1);
   if (layer.elements) {
-    for (const el of layer.elements) paintOps(ctx, styles, el.ops, 1);
+    layer.elements.forEach((el, i) => {
+      if (el.replacedBy !== null) paintSmudge(ctx, el.bounds, 1, smudgeSeed(layer.scene, i));
+      else paintOps(ctx, styles, el.ops, 1);
+    });
   } else {
     for (const note of layer.notes) paintOps(ctx, styles, note, 1);
   }
@@ -452,8 +494,17 @@ export function paintFrame(ctx: CanvasRenderingContext2D, input: FrameInput): vo
     paintEraser(ctx, reveal.notesErase, NOTES_REGION, chalkSeed(current.scene, 4343), cleanBoard(current));
     pen = null;
   }
-  current.elements?.forEach((el, i) => {
-    pen = paintOps(ctx, styles, el.ops, reveal.elements[i] ?? 0) ?? pen;
+  const elements = current.elements ?? [];
+  elements.forEach((el, i) => {
+    const shown = reveal.elements[i] ?? 0;
+    const by = el.replacedBy === null ? undefined : elements[el.replacedBy];
+    // The replacement fades this element out (and smudges its spot) before drawing itself.
+    const erased =
+      by && el.replacedBy !== null ? replaceReveal(reveal.elements[el.replacedBy] ?? 0, by.eraseInk, by.ink).erase : 0;
+    if (erased > 0 && shown > 0) paintSmudge(ctx, el.bounds, erased, smudgeSeed(current.scene, i));
+    if (erased >= 1) return;
+    const drawn = replaceReveal(shown, el.eraseInk, el.ink).draw;
+    pen = paintOps(ctx, styles, el.ops, drawn, 1 - erased) ?? pen;
   });
   if (pen && input.showPen) paintPen(ctx, pen);
   ctx.restore();

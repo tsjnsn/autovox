@@ -5,13 +5,17 @@ import {
   buildSceneGeometry,
   chalkSeed,
   elementOps,
+  findReplacements,
+  fitLabel,
   noteLayout,
   opsInk,
   polylineLength,
   revealedChars,
   revealSlices,
   truncatePolyline,
+  wrapText,
   type PaintOp,
+  type Pt,
 } from "../utils/chalk/geometry";
 import {
   beatWindow,
@@ -20,6 +24,7 @@ import {
   estimateBeatSeconds,
   frameAt,
   headingSeconds,
+  replaceReveal,
   sceneReveal,
   sceneTiming,
   WIPE_SECONDS,
@@ -471,6 +476,155 @@ void test("every pose, face and accessory draws a finite figure", () => {
         i++;
       }
     }
+  }
+});
+
+function strokePoints(el: ChalkElement): Pt[] {
+  const [op] = elementOps(el, chalkSeed(3, 0));
+  assert.ok(op?.type === "stroke");
+  return op.points;
+}
+
+function within(points: readonly Pt[], box: [number, number, number, number], slack: number): boolean {
+  const [x0, y0, x1, y1] = box;
+  return points.every(([x, y]) => x >= x0 - slack && x <= x1 + slack && y >= y0 - slack && y <= y1 + slack);
+}
+
+function passesNear(points: readonly Pt[], target: Pt, slack: number): boolean {
+  return points.some(([x, y]) => Math.hypot(x - target[0], y - target[1]) < slack);
+}
+
+void test("paths keep sharp corners and smooth only gentle runs", () => {
+  const steps: Pt[] = [[100, 500], [100, 450], [160, 450], [160, 400], [220, 400], [220, 350], [280, 350]];
+  const stairs = strokePoints({ kind: "path", beat: 0, color: "white", points: steps, closed: false });
+  assert.ok(within(stairs, [100, 350, 280, 500], 4), "stairs overshoot their corners");
+  for (const corner of steps) assert.ok(passesNear(stairs, corner, 2), `missed corner ${corner.join(",")}`);
+
+  const corners: Pt[] = [[400, 500], [500, 330], [600, 500]];
+  const triangle = strokePoints({ kind: "path", beat: 0, color: "white", points: corners, closed: true });
+  assert.ok(within(triangle, [400, 330, 600, 500], 4), "triangle balloons into a blob");
+  for (const corner of corners) assert.ok(passesNear(triangle, corner, 2), `missed corner ${corner.join(",")}`);
+  assert.ok(Math.hypot(triangle[0]![0] - triangle.at(-1)![0], triangle[0]![1] - triangle.at(-1)![1]) < 2, "loop not closed");
+
+  const samples: Pt[] = Array.from({ length: 13 }, (_, i) => [100 + i * 50, 300 + 40 * Math.sin((i * Math.PI) / 4)]);
+  const wave = strokePoints({ kind: "path", beat: 0, color: "white", points: samples, closed: false });
+  assert.ok(wave.length > samples.length * 3, "wave was not smoothed");
+  for (let i = 1; i < wave.length - 1; i++) {
+    const [a, b, c] = [wave[i - 1]!, wave[i]!, wave[i + 1]!];
+    const turn = Math.abs(Math.atan2(c[1] - b[1], c[0] - b[0]) - Math.atan2(b[1] - a[1], b[0] - a[0]));
+    assert.ok(Math.min(turn, 2 * Math.PI - turn) < (15 * Math.PI) / 180, `wave kinks at point ${i}`);
+  }
+});
+
+void test("labels break between words and hyphenate only words that can't fit", () => {
+  assert.deepEqual(fitLabel("2★ 3-cost", 74, 55, 26).lines, ["2★", "3-cost"]);
+  assert.deepEqual(fitLabel("Shared unit pool", 60, 40, 26).lines, ["Shared", "unit", "pool"]);
+  assert.deepEqual(fitLabel("Authentication", 70, 60, 26).lines, ["Authent-", "ication"]);
+  assert.deepEqual(fitLabel("Authentication", 200, 60, 26).lines, ["Authentication"]);
+  assert.deepEqual(wrapText("a supercalifragilistic word", 8), ["a", "superca-", "lifragi-", "listic", "word"]);
+});
+
+const figureAt = (x: number, y: number, extra: Partial<Extract<ChalkElement, { kind: "figure" }>> = {}): ChalkElement => ({
+  ...(base("figure") as Extract<ChalkElement, { kind: "figure" }>),
+  x,
+  y,
+  ...extra,
+});
+
+void test("a later figure or caption in the same spot replaces the earlier one", () => {
+  const elements: ChalkElement[] = [
+    figureAt(300, 500, { label: "Mia", pose: "stand" }),
+    { kind: "text", beat: 0, color: "white", x: 600, y: 150, size: 30, text: "Price: $5" },
+    figureAt(330, 500, { beat: 1, label: "Mia", pose: "arms_up" }),
+    { kind: "text", beat: 1, color: "yellow", x: 605, y: 152, size: 30, text: "Price: $8" },
+    figureAt(800, 500, { beat: 1, label: "Mia" }),
+    { kind: "text", beat: 1, color: "white", x: 600, y: 260, size: 30, text: "Demand rises" },
+    figureAt(305, 505, { beat: 2, label: "Mia", pose: "shrug" }),
+  ];
+  assert.deepEqual(findReplacements(elements), [2, 3, 6, null, null, null, null]);
+
+  // Same beat never replaces; a different name only when standing right on top.
+  assert.deepEqual(findReplacements([figureAt(300, 500), figureAt(300, 500)]), [null, null]);
+  assert.deepEqual(findReplacements([figureAt(300, 500, { label: "Ann" }), figureAt(360, 500, { beat: 1, label: "Bo" })]), [null, null]);
+  assert.deepEqual(findReplacements([figureAt(300, 500, { label: "Ann" }), figureAt(310, 500, { beat: 1, label: "Bo" })]), [1, null]);
+
+  const geometry = buildSceneGeometry({ elements }, 0);
+  assert.deepEqual(geometry.map((g) => g.replacedBy), [2, 3, 6, null, null, null, null]);
+  assert.deepEqual(geometry.map((g) => g.eraseInk > 0), [false, false, true, true, false, false, true]);
+  for (const g of geometry) assert.ok(g.bounds && g.bounds.x1 > g.bounds.x0 && g.bounds.y1 > g.bounds.y0);
+});
+
+void test("a replacement erases first, then draws, split by ink", () => {
+  const near = (reveal: number, erase: number, draw: number) => {
+    const got = replaceReveal(reveal, 280, 720);
+    assert.ok(Math.abs(got.erase - erase) < 1e-9 && Math.abs(got.draw - draw) < 1e-9, `${reveal}: ${JSON.stringify(got)}`);
+  };
+  near(0, 0, 0);
+  near(0.14, 0.5, 0);
+  near(0.28, 1, 0);
+  near(0.64, 1, 0.5);
+  near(1, 1, 1);
+  assert.deepEqual(replaceReveal(0.4, 0, 720), { erase: 0, draw: 0.4 });
+});
+
+void test("catch-up skips elements that a late replacement would erase anyway", () => {
+  const items: RevealItem[] = [
+    { beat: 0, ink: 600, replacedBy: 1 },
+    { beat: 1, ink: 900, replacedBy: null },
+  ];
+  // Art arrives during scene 0's second beat, when both are overdue.
+  const at = 6;
+  const arrival: ArrivalInfo = { at, frame: frameAt(at, BEATS, FULL_TIMELINE) };
+  const mid = reveal(at + CATCHUP_ERASE_SECONDS + 0.3, { elements: items, arrival });
+  assert.equal(mid.elements[0], 0);
+  assert.ok(mid.elements[1]! > 0, "the replacement catches up immediately");
+});
+
+void test("bubbles and labels move off art that would cover them", () => {
+  const speaker = figureAt(300, 450, { size: 180, label: "Mia", say: "Prices are going up again!" });
+  const preferred = elementOps(speaker, chalkSeed(0, 0));
+  const bubbleText = preferred.filter((op): op is Extract<PaintOp, { type: "text" }> => op.type === "text" && op.text !== "Mia");
+  const top = Math.min(...bubbleText.map((op) => op.y)) - 20;
+  const bottom = Math.max(...bubbleText.map((op) => op.y)) + 20;
+  const left = Math.min(...bubbleText.map((op) => op.x)) - 10;
+  // A block of text exactly where the bubble would go, and another under her feet.
+  const crowd: ChalkElement[] = [
+    speaker,
+    { kind: "box", beat: 0, color: "yellow", x: left, y: top, w: 260, h: bottom - top, label: "Supply shock" },
+    { kind: "text", beat: 0, color: "white", x: 250, y: 462, size: 30, text: "Here" },
+  ];
+  const geometry = buildSceneGeometry({ elements: crowd }, 0);
+  const placed = geometry[0]!.ops.filter((op): op is Extract<PaintOp, { type: "text" }> => op.type === "text");
+  const box = crowd[1] as Extract<ChalkElement, { kind: "box" }>;
+  for (const op of placed) {
+    if (op.text === "Mia") {
+      assert.ok(op.y < 450, "name label should move beside the legs, off the text under her feet");
+      continue;
+    }
+    const inside = op.x >= box.x - 5 && op.x <= box.x + box.w && op.y >= box.y && op.y <= box.y + box.h;
+    assert.ok(!inside, `bubble line "${op.text}" still sits on the box`);
+  }
+  assert.ok(placed.some((op) => op.text !== "Mia"), "bubble text missing");
+
+  // With nothing in the way, the preferred spots are kept.
+  assert.deepEqual(buildSceneGeometry({ elements: [speaker] }, 0)[0]!.ops, preferred);
+});
+
+void test("bubbles keep off check and cross marks, which would read as marking the speech", () => {
+  // A cross clipping the corner of the preferred bubble: only a few stroke cells, but it reads as crossing out the line.
+  const elements: ChalkElement[] = [
+    figureAt(830, 520, { size: 160, pose: "point_left", label: null }),
+    { kind: "cross", beat: 1, color: "pink", x: 660, y: 400, size: 40 },
+    figureAt(690, 520, { beat: 2, size: 120, pose: "hold", accessory: "cap", label: "Blade", say: "Hold the line!" }),
+  ];
+  const bubble = buildSceneGeometry({ elements }, 0)[2]!.ops.filter(
+    (op): op is Extract<PaintOp, { type: "text" }> => op.type === "text" && op.text !== "Blade",
+  );
+  assert.ok(bubble.length > 0, "bubble text missing");
+  for (const op of bubble) {
+    const right = op.x + op.text.length * op.size * 0.5;
+    const hits = right > 640 && op.x < 680 && op.y + op.size / 2 + 8 > 380 && op.y - op.size / 2 - 8 < 420;
+    assert.ok(!hits, `bubble line "${op.text}" at ${op.x},${op.y} sits on the cross`);
   }
 });
 

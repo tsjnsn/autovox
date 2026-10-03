@@ -17,6 +17,7 @@ import {
   type ChalkScene,
   type ChalkSceneDrawing,
 } from './types';
+import { chooseLayout, footprintBox, type Box, type Footprint, type MovableSpec } from './layout';
 
 export type Pt = [number, number];
 export type ChalkFont = 'hand' | 'mono';
@@ -57,6 +58,12 @@ export interface ElementGeometry {
   color: ChalkColor;
   ops: PaintOp[];
   ink: number;
+  /** The later element that erases this one and is drawn in its place; null when it stays. */
+  replacedBy: number | null;
+  /** Ink-equivalent time spent erasing what this element replaces first (0 when it replaces nothing). */
+  eraseInk: number;
+  /** Area its ops cover, where the eraser wipes. */
+  bounds: Box | null;
 }
 
 /** Renderer-written parts of a scene: its heading and per-beat fallback notes. */
@@ -353,14 +360,64 @@ function smoothPath(points: readonly Pt[], closed: boolean): Pt[] {
   return out;
 }
 
+/** Turns at least this sharp (radians) stay corners in a path; gentler runs are smoothed. */
+const PATH_CORNER = (50 * Math.PI) / 180;
+
+function turnAngle(a: Pt, b: Pt, c: Pt): number {
+  const ux = b[0] - a[0];
+  const uy = b[1] - a[1];
+  const vx = c[0] - b[0];
+  const vy = c[1] - b[1];
+  const lu = Math.hypot(ux, uy);
+  const lv = Math.hypot(vx, vy);
+  if (lu < 1e-6 || lv < 1e-6) return 0;
+  return Math.acos(clamp((ux * vx + uy * vy) / (lu * lv), -1, 1));
+}
+
+/**
+ * A path through the model's points: stairs, triangles and bars keep their
+ * corners (straight edges get hand wobble), while the gentle runs between
+ * corners are smoothed, so curves and waves stay round.
+ */
+function pathPts(points: readonly Pt[], closed: boolean, rng: Rng): Pt[] {
+  const last = points[points.length - 1];
+  const pts =
+    closed && points.length > 3 && points[0] && last && dist(points[0], last) < 1 ? points.slice(0, -1) : points.slice();
+  const n = pts.length;
+  const loop = closed && n >= 3;
+  const at = (i: number): Pt => pts[((i % n) + n) % n] ?? [0, 0];
+  const corners: number[] = [];
+  for (let i = loop ? 0 : 1; i < (loop ? n : n - 1); i++) {
+    if (turnAngle(at(i - 1), at(i), at(i + 1)) >= PATH_CORNER) corners.push(i);
+  }
+  if (loop && corners.length === 0) return smoothPath(pts, true);
+  const breaks = loop ? corners : [0, ...corners, n - 1];
+  const runs = loop ? breaks.length : breaks.length - 1;
+  const out: Pt[] = [];
+  for (let r = 0; r < runs; r++) {
+    const from = breaks[r] ?? 0;
+    // A loop's last run wraps back to its first corner.
+    const to = breaks[r + 1] ?? (breaks[0] ?? 0) + n;
+    const run: Pt[] = [];
+    for (let i = from; i <= to; i++) run.push(at(i));
+    const a = run[0];
+    const b = run[1];
+    const seg = run.length === 2 && a && b ? handLine(a, b, rng, 0.6) : smoothPath(run, false);
+    if (out.length > 0) seg.shift();
+    out.push(...seg);
+  }
+  return out;
+}
+
 function quadAt(a: Pt, c: Pt, b: Pt, t: number): Pt {
   const u = 1 - t;
   return [u * u * a[0] + 2 * u * t * c[0] + t * t * b[0], u * u * a[1] + 2 * u * t * c[1] + t * t * b[1]];
 }
 
-/** Greedy word wrap; explicit newlines are kept, over-long words are split. */
+/** Greedy word wrap; explicit newlines are kept, over-long words are hyphenated. */
 export function wrapText(text: string, maxChars: number): string[] {
   const limit = Math.max(1, Math.floor(maxChars));
+  const piece = limit >= 3 ? limit - 1 : limit;
   const out: string[] = [];
   for (const para of text.split('\n')) {
     let line = '';
@@ -371,8 +428,8 @@ export function wrapText(text: string, maxChars: number): string[] {
           out.push(line);
           line = '';
         }
-        out.push(word.slice(0, limit));
-        word = word.slice(limit);
+        out.push(piece < limit ? `${word.slice(0, piece)}-` : word.slice(0, piece));
+        word = word.slice(piece);
       }
       if (!word) continue;
       if (!line) line = word;
@@ -388,7 +445,13 @@ export function wrapText(text: string, maxChars: number): string[] {
   return out;
 }
 
-/** Picks a font size (and up to three lines) so a label fits maxW × maxH. */
+const MIN_LABEL_SIZE = 11;
+
+/**
+ * Picks a font size (and up to three lines) so a label fits maxW × maxH.
+ * Lines break between words; a word is hyphenated only when it can't be
+ * written whole at the minimum size.
+ */
 export function fitLabel(
   text: string,
   maxW: number,
@@ -399,15 +462,26 @@ export function fitLabel(
   if (!clean) return { lines: [], size: preferred };
   const w = Math.max(20, maxW);
   const h = Math.max(12, maxH);
-  let best: { lines: string[]; size: number } = { lines: [clean], size: 0 };
-  for (let count = 1; count <= 3; count++) {
-    const lines = count === 1 ? [clean] : wrapText(clean, Math.ceil(clean.length / count));
-    const longest = Math.max(1, ...lines.map((l) => l.length));
-    const size = Math.min(preferred, w / (longest * HAND_ADVANCE), h / (lines.length * 1.15));
-    if (size > best.size + 0.5) best = { lines, size };
-    if (size >= Math.min(preferred, 18)) break;
+  const longestWord = Math.max(1, ...clean.split(' ').map((word) => word.length));
+  const search = (splitWords: boolean) => {
+    let best: { lines: string[]; size: number } = { lines: [clean], size: 0 };
+    for (let count = 1; count <= (splitWords ? 2 : 3); count++) {
+      const even = Math.ceil(clean.length / count);
+      // A split word's hyphen takes a character of its line.
+      const lines = count === 1 ? [clean] : wrapText(clean, splitWords ? even + 1 : Math.max(even, longestWord));
+      const longest = Math.max(1, ...lines.map((l) => l.length));
+      const size = Math.min(preferred, w / (longest * HAND_ADVANCE), h / (lines.length * 1.15));
+      if (size > best.size + 0.5) best = { lines, size };
+      if (size >= Math.min(preferred, 18)) break;
+    }
+    return best;
+  };
+  let best = search(false);
+  if (best.size < MIN_LABEL_SIZE) {
+    const split = search(true);
+    if (split.size > best.size + 0.5) best = split;
   }
-  return { lines: best.lines, size: clamp(best.size, 11, preferred) };
+  return { lines: best.lines, size: clamp(best.size, MIN_LABEL_SIZE, preferred) };
 }
 
 /** Shifts a text anchor so its estimated extent stays inside the board. */
@@ -426,13 +500,51 @@ function finitePt(p: Pt): boolean {
   return Number.isFinite(p[0]) && Number.isFinite(p[1]);
 }
 
+/** A renderer-placed part (bubble, name, arrow caption) with candidate spots, preferred first. */
+interface Movable {
+  type: 'movable';
+  options: PaintOp[][];
+  attached: boolean;
+}
+
+type Part = PaintOp | Movable;
+
+function resolveParts(parts: readonly Part[], pick: () => number): PaintOp[] {
+  const out: PaintOp[] = [];
+  for (const part of parts) {
+    if (part.type === 'movable') out.push(...(part.options[pick()] ?? part.options[0] ?? []));
+    else out.push(part);
+  }
+  return out;
+}
+
 /** Accumulates ops in draw order; clamps strokes into the board. */
 class OpList {
-  readonly list: PaintOp[] = [];
+  readonly parts: Part[] = [];
   color: ChalkColor;
 
   constructor(color: ChalkColor) {
     this.color = color;
+  }
+
+  /** Ops with every movable part in its preferred spot. */
+  get list(): PaintOp[] {
+    return resolveParts(this.parts, () => 0);
+  }
+
+  /**
+   * A part the scene layout may move: each builder draws one candidate spot.
+   * An `attached` part sits against its own element, so only other elements' art counts against a spot.
+   */
+  movable(builders: readonly ((ops: OpList) => void)[], attached = false): void {
+    const options = builders
+      .map((build) => {
+        const ops = new OpList(this.color);
+        build(ops);
+        return ops.list;
+      })
+      .filter((option) => option.length > 0);
+    if (options.length > 0) this.parts.push({ type: 'movable', options, attached });
   }
 
   stroke(points: readonly Pt[], weight = 1, alpha = 1): void {
@@ -440,7 +552,7 @@ class OpList {
     const first = pts[0];
     if (!first) return;
     if (pts.length === 1) pts.push([first[0] + 0.3, first[1]]);
-    this.list.push({
+    this.parts.push({
       type: 'stroke',
       points: pts,
       color: this.color,
@@ -462,7 +574,7 @@ class OpList {
     const clean = text.replace(/\s+$/, '');
     if (!clean || !Number.isFinite(x) || !Number.isFinite(y) || !(size > 0)) return;
     const width = estimateTextWidth(clean, size, font);
-    this.list.push({
+    this.parts.push({
       type: 'text',
       x: fitAnchorX(x, width, align),
       y: clamp(y, size * 0.55, BOARD_HEIGHT - size * 0.55),
@@ -856,6 +968,35 @@ function accessoryOps(
   }
 }
 
+/**
+ * Candidate top-left corners for a w × h bubble around a head at (hx, hy):
+ * above it on the roomier side first, then the other side, beside the head,
+ * higher up, and centered overhead.
+ */
+function bubbleSpots(hx: number, hy: number, r: number, w: number, h: number): Pt[] {
+  const right = hx + r * 0.9;
+  const left = hx - r * 0.9 - w;
+  const sides = right + w > BOARD_WIDTH - TEXT_MARGIN ? [left, right] : [right, left];
+  const [near, far] = sides as [number, number];
+  const above = hy - r * 0.9 - h;
+  const beside = hy - h / 2;
+  const higher = above - h * 0.6 - r * 0.5;
+  const besideX = (x: number) => (x === right ? hx + r * 1.4 : hx - r * 1.4 - w);
+  const spots: Pt[] = [
+    [near, above],
+    [far, above],
+    [besideX(near), beside],
+    [besideX(far), beside],
+    [near, higher],
+    [far, higher],
+    [hx - w / 2, above - r * 0.6],
+  ];
+  return spots.map(([x, y]) => [
+    clamp(x, TEXT_MARGIN, Math.max(TEXT_MARGIN, BOARD_WIDTH - TEXT_MARGIN - w)),
+    clamp(y, BOARD_HEADING_BAND + 4, Math.max(BOARD_HEADING_BAND + 4, BOARD_HEIGHT - TEXT_MARGIN - h)),
+  ]);
+}
+
 function speechBubbleOps(ops: OpList, text: string, hx: number, hy: number, r: number, figSize: number, rng: Rng): void {
   const size = clamp(figSize * 0.1, 14, 18);
   let lines = wrapText(text.trim(), 22);
@@ -867,14 +1008,30 @@ function speechBubbleOps(ops: OpList, text: string, hx: number, hy: number, r: n
   const pad = size * 0.6;
   const w = longest * size * HAND_ADVANCE + pad * 2;
   const h = lines.length * size * 1.2 + pad * 1.4;
-  let left = hx + r * 0.9;
-  if (left + w > BOARD_WIDTH - TEXT_MARGIN) left = hx - r * 0.9 - w;
-  left = clamp(left, TEXT_MARGIN, Math.max(TEXT_MARGIN, BOARD_WIDTH - TEXT_MARGIN - w));
-  const top = clamp(
-    hy - r * 0.9 - h,
-    BOARD_HEADING_BAND + 4,
-    Math.max(BOARD_HEADING_BAND + 4, BOARD_HEIGHT - TEXT_MARGIN - h),
+  const seed = Math.floor(rng() * 2 ** 32);
+  ops.movable(
+    bubbleSpots(hx, hy, r, w, h).map(
+      ([left, top]) =>
+        (o: OpList) =>
+          drawBubble(o, lines, size, pad, left, top, w, h, hx, hy, r, mulberry32(seed)),
+    ),
   );
+}
+
+function drawBubble(
+  ops: OpList,
+  lines: readonly string[],
+  size: number,
+  pad: number,
+  left: number,
+  top: number,
+  w: number,
+  h: number,
+  hx: number,
+  hy: number,
+  r: number,
+  rng: Rng,
+): void {
   const bottom = top + h;
   const toRight = left + w / 2 >= hx;
 
@@ -931,18 +1088,22 @@ function figureOps(ops: OpList, el: FigureElement, rng: Rng): void {
     ops.text(hx + 1.7 * r * dir, hy - 1.2 * r, Math.max(14, 1.4 * r), '?', 'hand', 'center');
   }
   if (el.label) {
+    const label = el.label;
     const size = clamp(h * 0.12, 14, 22);
     const below = el.y + 6 + size * 0.6;
-    if (below + size * 0.6 <= BOARD_HEIGHT - 2) {
-      ops.text(el.x, below, size, el.label, 'hand', 'center');
-    } else {
-      // Feet on the bottom edge: write the name beside the legs (right unless that overflows).
-      const width = estimateTextWidth(el.label, size);
-      const offset = 0.26 * h + 6 + width / 2;
-      const side = el.x + offset + width / 2 <= BOARD_WIDTH - TEXT_MARGIN ? 1 : -1;
-      const x = el.x + side * offset;
-      ops.text(x, el.y - 0.12 * h, size, el.label, 'hand', 'center');
-    }
+    // Below the feet; beside the legs (the roomier side first) when that's crowded or off the board.
+    const width = estimateTextWidth(label, size);
+    const offset = 0.26 * h + 6 + width / 2;
+    const near = el.x + offset + width / 2 <= BOARD_WIDTH - TEXT_MARGIN ? 1 : -1;
+    const spots: Pt[] = [
+      [el.x + near * offset, el.y - 0.12 * h],
+      [el.x - near * offset, el.y - 0.12 * h],
+    ];
+    if (below + size * 0.6 <= BOARD_HEIGHT - 2) spots.unshift([el.x, below]);
+    ops.movable(
+      spots.map(([x, y]) => (o: OpList) => o.text(x, y, size, label, 'hand', 'center')),
+      true,
+    );
   }
   if (el.say) speechBubbleOps(ops, el.say, hx, hy, r, h, rng);
 }
@@ -1084,16 +1245,47 @@ function arrowOps(ops: OpList, el: ArrowElement, rng: Rng): void {
       sx = -sx;
       sy = -sy;
     }
-    const mid = quadAt(a, c, b, 0.5);
+    const label = el.label;
     const off = Math.abs(sy) * (lh / 2 + 8) + Math.abs(sx) * (lw / 2 + 10);
-    const cx = clamp(mid[0] + sx * off, lw / 2 + TEXT_MARGIN, BOARD_WIDTH - lw / 2 - TEXT_MARGIN);
-    const cy = clamp(mid[1] + sy * off, lh / 2 + 4, BOARD_HEIGHT - lh / 2 - 4);
-    ops.label(el.label, cx, cy, 320, 56, 20);
+    const place = (o: OpList, x: number, y: number) =>
+      o.label(
+        label,
+        clamp(x, lw / 2 + TEXT_MARGIN, BOARD_WIDTH - lw / 2 - TEXT_MARGIN),
+        clamp(y, lh / 2 + 4, BOARD_HEIGHT - lh / 2 - 4),
+        320,
+        56,
+        20,
+      );
+    // Mid-shaft on the preferred side, then the other side, then nearer either end.
+    const spots: [number, number][] = [
+      [1, 0.5],
+      [-1, 0.5],
+      [1, 0.3],
+      [1, 0.7],
+      [-1, 0.3],
+      [-1, 0.7],
+    ];
+    // Last resort: just past the tail, in line with the shaft (a caption the arrow starts from).
+    const toward = Math.abs(curve) < 0.02 ? b : c;
+    const ux = (a[0] - toward[0]) / Math.max(1e-6, dist(a, toward));
+    const uy = (a[1] - toward[1]) / Math.max(1e-6, dist(a, toward));
+    const reach = Math.abs(ux) * (lw / 2 + 8) + Math.abs(uy) * (lh / 2 + 6);
+    ops.movable([
+      ...spots.map(([side, t]) => (o: OpList) => {
+        const at = quadAt(a, c, b, t);
+        place(o, at[0] + side * sx * off, at[1] + side * sy * off);
+      }),
+      (o: OpList) => place(o, a[0] + ux * reach, a[1] + uy * reach),
+    ]);
   }
 }
 
-/** Ordered paint ops for one element. `seed` fixes its hand-drawn wobble. */
+/** Ordered paint ops for one element, every movable part in its preferred spot. `seed` fixes its hand-drawn wobble. */
 export function elementOps(el: ChalkElement, seed: number): PaintOp[] {
+  return resolveParts(elementParts(el, seed), () => 0);
+}
+
+function elementParts(el: ChalkElement, seed: number): Part[] {
   const rng = mulberry32(seed);
   const ops = new OpList(el.color);
   switch (el.kind) {
@@ -1119,7 +1311,7 @@ export function elementOps(el: ChalkElement, seed: number): PaintOp[] {
       arrowOps(ops, el, rng);
       break;
     case 'path':
-      ops.stroke(smoothPath(el.points, el.closed && el.points.length >= 3));
+      ops.stroke(pathPts(el.points, el.closed, rng));
       break;
     case 'check': {
       const s = el.size;
@@ -1144,14 +1336,161 @@ export function elementOps(el: ChalkElement, seed: number): PaintOp[] {
       break;
     }
   }
-  return ops.list;
+  return ops.parts;
 }
 
-/** Geometry for every element of a scene drawing, seeded by scene + index. */
+// ---------------------------------------------------------------- scene
+
+/** Ink-equivalent time for wiping what an element replaces before drawing it. */
+export const ERASE_INK = 280;
+
+function textOpBox(op: TextOp): Box {
+  const width = estimateTextWidth(op.text, op.size, op.font);
+  const left = op.align === 'left' ? op.x : op.align === 'center' ? op.x - width / 2 : op.x - width;
+  return { x0: left, y0: op.y - op.size * 0.55, x1: left + width, y1: op.y + op.size * 0.55 };
+}
+
+function footprint(ops: readonly PaintOp[]): Footprint {
+  const boxes: Box[] = [];
+  const strokes: Pt[][] = [];
+  for (const op of ops) {
+    if (op.type === 'text') boxes.push(textOpBox(op));
+    else strokes.push(op.points);
+  }
+  return { boxes, strokes };
+}
+
+/** A movable candidate's footprint: an outline that closes on itself (a bubble) covers the area inside it. */
+function candidateFootprint(ops: readonly PaintOp[]): Footprint {
+  const { boxes, strokes } = footprint(ops);
+  const zones: Box[] = [];
+  const open = strokes.filter((points) => {
+    const first = points[0];
+    const last = points[points.length - 1];
+    if (points.length < 4 || !first || !last || dist(first, last) > 3) return true;
+    const box = footprintBox({ boxes: [], strokes: [points] });
+    if (box) zones.push(box);
+    return false;
+  });
+  return { boxes, strokes: open, zones };
+}
+
+/** The board area an element's ops cover. */
+export function opsBounds(ops: readonly PaintOp[]): Box | null {
+  return footprintBox(footprint(ops));
+}
+
+/** Rough extent of a text or code block as the renderer writes it. */
+function blockBox(el: Extract<ChalkElement, { kind: 'text' | 'code' }>): Box {
+  const font: ChalkFont = el.kind === 'code' ? 'mono' : 'hand';
+  const lines = el.text.split('\n');
+  const width = Math.max(el.size, ...lines.map((line) => estimateTextWidth(line.trimEnd(), el.size, font)));
+  const height = lines.length * el.size * (el.kind === 'code' ? 1.3 : 1.2);
+  return { x0: el.x, y0: el.y, x1: el.x + width, y1: el.y + height };
+}
+
+function overlapShare(a: Box, b: Box): number {
+  const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0);
+  const h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  if (w <= 0 || h <= 0) return 0;
+  const smaller = Math.min((a.x1 - a.x0) * (a.y1 - a.y0), (b.x1 - b.x0) * (b.y1 - b.y0));
+  return smaller > 0 ? (w * h) / smaller : 0;
+}
+
+const nameOf = (el: FigureElement) => (el.label ?? '').trim().toLowerCase();
+
+/**
+ * True when `b` would be drawn on top of `a`: a figure where the same
+ * character (or anyone, if right on top) stands, or a text or code block
+ * that mostly covers another of its kind. The same character up or down a
+ * step (sitting, standing on a box) still counts: two copies stacked in one
+ * column never read as two people.
+ */
+export function sameSpot(a: ChalkElement, b: ChalkElement): boolean {
+  if (a.kind === 'figure' && b.kind === 'figure') {
+    const size = Math.max(a.size, b.size);
+    const dx = Math.abs(a.x - b.x) / size;
+    const dy = Math.abs(a.y - b.y) / size;
+    return (dx <= 0.2 && dy <= 0.15) || (nameOf(a) === nameOf(b) && dx <= 0.35 && dy <= 0.5);
+  }
+  if ((a.kind === 'text' && b.kind === 'text') || (a.kind === 'code' && b.kind === 'code')) {
+    return overlapShare(blockBox(a), blockBox(b)) >= 0.5;
+  }
+  return false;
+}
+
+/** What an element looks like, ignoring when it's drawn (and, for figures and text, small moves). */
+function contentKey(el: ChalkElement): string {
+  const ignore = el.kind === 'figure' || el.kind === 'text' || el.kind === 'code' ? ['beat', 'x', 'y'] : ['beat'];
+  return JSON.stringify(el, (key, value: unknown) => (ignore.includes(key) ? undefined : value));
+}
+
+/** True when `b` redraws `a` unchanged: drawing it again would add nothing. */
+export function isRepeat(a: ChalkElement, b: ChalkElement): boolean {
+  if (a.kind !== b.kind || contentKey(a) !== contentKey(b)) return false;
+  return b.kind === 'figure' || b.kind === 'text' || b.kind === 'code' ? sameSpot(a, b) : true;
+}
+
+/**
+ * For each element, the first later-beat element drawn in its spot, which
+ * erases it and takes its place (a character changing pose, a caption being
+ * rewritten); null when it stays to the end of the scene.
+ */
+export function findReplacements(elements: readonly ChalkElement[]): (number | null)[] {
+  return elements.map((el, i) => {
+    for (let j = i + 1; j < elements.length; j++) {
+      const later = elements[j]!;
+      if (later.beat > el.beat && sameSpot(el, later)) return j;
+    }
+    return null;
+  });
+}
+
+/**
+ * Geometry for every element of a scene drawing, seeded by scene + index.
+ * Bubbles and labels move off the art where they'd cover it.
+ */
 export function buildSceneGeometry(drawing: ChalkSceneDrawing, scene: number): ElementGeometry[] {
-  return drawing.elements.map((el, i) => {
-    const ops = elementOps(el, chalkSeed(scene, i));
-    return { beat: el.beat, color: el.color, ops, ink: opsInk(ops) };
+  const elements = drawing.elements;
+  const parts = elements.map((el, i) => elementParts(el, chalkSeed(scene, i)));
+  const replacedBy = findReplacements(elements);
+  // Versions of one thing (a chain of replacements) never share the board, so they ignore each other.
+  const chain = elements.map((_, i) => i);
+  const root = (i: number): number => (chain[i] === i ? i : (chain[i] = root(chain[i]!)));
+  replacedBy.forEach((by, i) => {
+    if (by !== null) chain[root(by)] = root(i);
+  });
+  const partners = elements.map((_, i) => elements.map((__, j) => j).filter((j) => j !== i && root(j) === root(i)));
+  const fixed = parts.map((list, i) => {
+    const art = footprint(list.filter((p): p is PaintOp => p.type !== 'movable'));
+    const el = elements[i]!;
+    if (el.kind === 'check' || el.kind === 'cross') {
+      // A mark says something about what it sits on; anything drawn across it reads as marked too.
+      const box = footprintBox(art);
+      return box ? { boxes: [box], strokes: [] } : art;
+    }
+    if (el.kind !== 'figure') return art;
+    const half = el.size * 0.18;
+    return { ...art, zones: [{ x0: el.x - half, y0: el.y - el.size, x1: el.x + half, y1: el.y - el.size * 0.08 }] };
+  });
+  const movables: MovableSpec[] = parts.flatMap((list, owner) =>
+    list.flatMap((p) =>
+      p.type === 'movable' ? [{ owner, options: p.options.map(candidateFootprint), attached: p.attached }] : [],
+    ),
+  );
+  const choices = chooseLayout(fixed, movables, partners);
+  let next = 0;
+  return elements.map((el, i) => {
+    const ops = resolveParts(parts[i]!, () => choices[next++] ?? 0);
+    return {
+      beat: el.beat,
+      color: el.color,
+      ops,
+      ink: opsInk(ops),
+      replacedBy: replacedBy[i] ?? null,
+      eraseInk: replacedBy.includes(i) ? ERASE_INK : 0,
+      bounds: opsBounds(ops),
+    };
   });
 }
 

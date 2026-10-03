@@ -2,6 +2,7 @@ import type { LlmAuth } from '../auth';
 import { getLanguageName, type OutputLanguage } from '../languages';
 import { approxTokens, createStructuredResponse, type StreamProgress } from '../openai';
 import { emptyUsage, type ProviderUsage } from '../usage';
+import { isRepeat, sameSpot } from './geometry';
 import {
   BOARD_HEADING_BAND,
   BOARD_HEIGHT,
@@ -127,7 +128,12 @@ COMPOSITION
 - Stick figures are the star: typically 120–180 tall, y = their feet. Share a ground line (e.g. y ≈ 520) unless the scene calls for something else.
 - Every appearance of a cast member uses their accessory, and their label (text) is their name. Other figures use accessory "none".
 - Each beat adds 1–5 elements illustrating exactly what that beat says, listed in the order a teacher would draw them. 6–20 elements in total.
-- Avoid overlaps: keep labels, bubbles, and arrows clear of figures and of each other.
+- Avoid overlaps: keep figures, boxes, and text clear of each other. The renderer places speech bubbles, figure names, and arrow labels in the clearest spot nearby, so leave free space around each figure (above the head, below the feet) and along arrows.
+
+CHANGES OVER THE BEATS
+- Everything drawn stays on the board until the scene ends; the board builds up.
+- To show something change, redraw it in a later beat at the SAME spot: a figure with the same name at the same x and y (new pose, face, or speech bubble), or text over the same spot (an updated number or caption). The renderer erases the old one, then draws the new one in its place.
+- Never redraw something that hasn't changed: it is still on the board. Never draw two different things in one spot unless the later one should replace the earlier.
 - Prefer visual metaphors over words. Use text only for key terms. Labels at most 5 words, speech bubbles at most 6 words.
 - White chalk by default; yellow, pink, blue, or green sparingly for emphasis.
 - code only for literal short code: at most 4 lines, at most 28 characters per line.
@@ -143,7 +149,7 @@ Every element lists every field; set fields that do not apply to its kind to nul
 - circle: x, y = center, size = radius (8–250), text = label centered inside or null.
 - line: from (x, y) to (x2, y2).
 - arrow: from tail (x, y) to head (x2, y2); curve = −1..1 bend of the shaft (0 straight, the sign picks the side); text = short label or null.
-- path: points = flattened coordinates [x0, y0, x1, y1, …] of a polyline (2–60 points); closed = true to join the last point back to the first.
+- path: points = flattened coordinates [x0, y0, x1, y1, …] of a polyline (2–60 points); closed = true to join the last point back to the first. Sharp turns stay sharp corners (stairs, triangles, zigzags, bar outlines) and gentle bends are smoothed, so give curves and waves many closely spaced points (about every 30 units).
 - check / cross: x, y = center, size = width (~40).
 - pose, face, accessory, say are only for figure; points and closed only for path; curve only for arrow.`;
 
@@ -581,7 +587,21 @@ export function sanitizeDrawing(
     .sort((a, b) => a.element.beat - b.element.beat || a.order - b.order)
     .slice(0, MAX_ELEMENTS)
     .map(({ element }) => element);
-  return { elements };
+  return { elements: dropRepeats(elements) };
+}
+
+/** Drops elements that redraw, unchanged, whatever was last drawn in their spot. */
+export function dropRepeats(elements: readonly ChalkElement[]): ChalkElement[] {
+  const kept: ChalkElement[] = [];
+  for (const element of elements) {
+    let last: ChalkElement | undefined;
+    for (let i = kept.length - 1; i >= 0 && !last; i--) {
+      const prior = kept[i]!;
+      if (sameSpot(prior, element) || isRepeat(prior, element)) last = prior;
+    }
+    if (!last || !isRepeat(last, element)) kept.push(element);
+  }
+  return kept;
 }
 
 /** Draw every scene in parallel with bounded concurrency. */

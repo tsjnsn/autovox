@@ -6,7 +6,7 @@ import {
   createChalkStyles,
   getBoardTexture,
   paintBackground,
-  paintOps,
+  paintLayerFinished,
 } from '../../utils/chalk/paint';
 import {
   BOARD_HEIGHT,
@@ -117,16 +117,14 @@ function boardCanvas(
   ctx.textBaseline = 'middle';
   ctx.textAlign = 'left';
   paintBackground(ctx, getBoardTexture());
-  const styles = createChalkStyles(ctx);
   const chrome = buildSceneChrome(scene, sceneIndex);
-  paintOps(ctx, styles, chrome.heading, 1);
-  if (drawing && drawing.elements.length > 0) {
-    for (const item of buildSceneGeometry(drawing, sceneIndex)) {
-      paintOps(ctx, styles, item.ops, 1);
-    }
-  } else {
-    for (const note of chrome.notes) paintOps(ctx, styles, note, 1);
-  }
+  paintLayerFinished(ctx, createChalkStyles(ctx), {
+    scene: sceneIndex,
+    hazy: false,
+    heading: chrome.heading,
+    notes: chrome.notes,
+    elements: drawing && drawing.elements.length > 0 ? buildSceneGeometry(drawing, sceneIndex) : null,
+  });
   return canvas;
 }
 

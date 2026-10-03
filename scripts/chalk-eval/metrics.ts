@@ -25,6 +25,8 @@ export interface SceneMetrics {
   texts: number;
   /** Beats that add nothing to the board (the drawing ignores that line). */
   emptyBeats: number;
+  /** Elements a later beat erases and redraws in place. */
+  replaced: number;
   /** Pairs of text from different elements that visibly overlap. */
   textCollisions: number;
   /** Text from one element written over another element's stick figure. */
@@ -86,24 +88,6 @@ function textBox(op: Extract<PaintOp, { type: 'text' }>): Box {
   return { x0, y0: op.y - half, x1: x0 + width, y1: op.y + half + (lines.length - 1) * op.size };
 }
 
-function strokeBox(ops: readonly PaintOp[]): Box | null {
-  let box: Box | null = null;
-  for (const op of ops) {
-    if (op.type !== 'stroke') continue;
-    for (const [x, y] of op.points) {
-      box = box
-        ? {
-            x0: Math.min(box.x0, x),
-            y0: Math.min(box.y0, y),
-            x1: Math.max(box.x1, x),
-            y1: Math.max(box.y1, y),
-          }
-        : { x0: x, y0: y, x1: x, y1: y };
-    }
-  }
-  return box;
-}
-
 /** Share of the smaller box that must overlap before it reads as a collision. */
 const COLLISION_SHARE = 0.2;
 /** Stick figures are thin, so a label crossing the body overlaps little area. */
@@ -118,14 +102,18 @@ export function sceneMetrics(
   const texts: { element: number; box: Box }[] = [];
   const figures: { element: number; box: Box }[] = [];
   geometry.forEach((item, element) => {
+    // Erased before the scene ends: not on the finished board.
+    if (item.replacedBy !== null) return;
     for (const op of item.ops) {
       if (op.type === 'text' && op.text.trim()) {
         texts.push({ element, box: textBox(op) });
       }
     }
-    if (drawing.elements[element]?.kind === 'figure') {
-      const box = strokeBox(item.ops);
-      if (box) figures.push({ element, box });
+    const el = drawing.elements[element];
+    if (el?.kind === 'figure') {
+      // The body only: a figure's ops also hold its speech bubble's outline.
+      const half = el.size * 0.25;
+      figures.push({ element, box: { x0: el.x - half, y0: el.y - el.size, x1: el.x + half, y1: el.y } });
     }
   });
 
@@ -156,6 +144,7 @@ export function sceneMetrics(
     emptyBeats: Array.from({ length: beatCount }, (_, i) => i).filter(
       (beat) => !beatsUsed.has(beat),
     ).length,
+    replaced: geometry.filter((item) => item.replacedBy !== null).length,
     textCollisions,
     textOverFigures,
   };

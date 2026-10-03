@@ -237,7 +237,7 @@ export class BoardRenderer {
     const entry: SceneArt = {
       drawing: usable,
       elements,
-      items: elements.map((e) => ({ beat: e.beat, ink: e.ink })),
+      items: elements.map((e) => ({ beat: e.beat, ink: e.ink + e.eraseInk, replacedBy: e.replacedBy })),
     };
     this.art.set(scene, entry);
     this.version++;

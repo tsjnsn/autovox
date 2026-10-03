@@ -47,6 +47,8 @@ export interface RevealItem {
   /** Beat within the scene. */
   beat: number;
   ink: number;
+  /** Index of the later item that erases this one and takes its place. */
+  replacedBy?: number | null;
 }
 
 export interface ArrivalInfo {
@@ -225,6 +227,20 @@ function elementSlots(
   });
 }
 
+/**
+ * An item that replaces another spends the first part of its reveal erasing
+ * the old one and the rest drawing itself, split by ink.
+ */
+export function replaceReveal(reveal: number, eraseInk: number, ink: number): { erase: number; draw: number } {
+  if (!(eraseInk > 0)) return { erase: 0, draw: reveal };
+  const drawInk = Math.max(0, ink);
+  const done = reveal * (eraseInk + drawInk);
+  return {
+    erase: clamp01(done / eraseInk),
+    draw: drawInk > 0 ? clamp01((done - eraseInk) / drawInk) : reveal >= 1 ? 1 : 0,
+  };
+}
+
 function noteReveals(frame: BoardFrame, timing: SceneTiming, noteInks: readonly number[], reduced: boolean): number[] {
   return noteInks.map((ink, b) => {
     if (b < frame.beat) return 1;
@@ -286,14 +302,17 @@ export function sceneReveal(input: SceneRevealInput): SceneReveal {
   const timingAt = sceneTiming(arrival.frame, heading, reduced);
   const slotsAt = elementSlots(arrival.frame, timingAt, elements, beatCount);
   const late = slotsAt.map((s) => s.start < drawStart);
+  // Late items whose replacement is late too would be drawn only to be erased.
+  const skipped = elements.map((it, i) => late[i] === true && it.replacedBy != null && late[it.replacedBy] === true);
   let lateInk = 0;
   elements.forEach((it, i) => {
-    if (late[i]) lateInk += Math.max(0, it.ink);
+    if (late[i] && !skipped[i]) lateInk += Math.max(0, it.ink);
   });
   const catchUp = reduced ? 0 : Math.min(CATCHUP_DRAW_SECONDS, Math.max(MIN_DRAW_SECONDS, lateInk / INK_PER_SECOND));
   let acc = 0;
   elements.forEach((it, i) => {
-    if (!late[i]) return;
+    if (skipped[i]) reveals[i] = 0;
+    if (!late[i] || skipped[i]) return;
     const ink = Math.max(0, it.ink);
     const start = lateInk > 0 ? drawStart + (catchUp * acc) / lateInk : drawStart;
     const duration = lateInk > 0 ? (catchUp * ink) / lateInk : 0;

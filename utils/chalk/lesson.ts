@@ -130,13 +130,14 @@ STRUCTURE
 - visual: concrete art direction for the whole board, for an illustrator who draws only stick figures, simple shapes, arrows, short labels, and tiny code snippets. Describe the stick-figure scene or visual metaphor, the left-to-right layout, which cast members appear and what they are doing, and what gets added on each beat.
 - beats: 2–4 per scene. "say" is 1–3 spoken sentences, at most about 45 words, read verbatim by the voice. "note" is a chalk note of at most 6 words shown for that beat.
 - Beats within a scene progressively build ONE coherent picture; never switch to an unrelated picture mid-scene. Start a new scene when the picture needs to change.
+- Within a scene, things on the board can change in place (a character reacts, a number or label updates), but nothing is cleared until the scene ends. A before/after belongs side by side on one board, or on two consecutive boards.
 - cast: 1–3 recurring stick-figure characters, reused across scenes so the lesson feels continuous. Each has a short name (at most 14 characters), a distinct accessory (at most one may be "none"), and the role they play in the lesson (for example "the learner", "the server", "the build tool").
 - estimatedSeconds: estimated spoken duration of all "say" text.`;
 
 function lessonLanguageGuidance(code: OutputLanguage): string {
   const name = getLanguageName(code);
   if (!name) {
-    return `Teach in the same language as the source page (its dominant language if it mixes several). Do not translate into English unless the page is primarily in English.
+    return `Teach in the language the PAGE TEXT below is written in (its dominant language if it mixes several): an English page gets an English lesson, a Spanish page a Spanish lesson. Never switch to a language the page doesn't use.
 Every string in the JSON output (title, headings, visuals, narration, notes, cast names and roles) must be in that language.`;
   }
   return `Teach in ${name}. Translate from the source while keeping facts, names, numbers, and commands exact.
