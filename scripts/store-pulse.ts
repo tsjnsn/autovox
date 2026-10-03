@@ -1,6 +1,19 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  buildActions,
+  formatRating,
+  formatUsers,
+  GA_MEASUREMENT_RE,
+  renderMarkdown,
+  UUID_RE,
+  validCategory,
+  validSize,
+  validVersion,
+  type StorePulse,
+  type StoreReview,
+} from './lib/pulse';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const EXTENSION_META_PATH = resolve(ROOT, 'store/extension.json');
@@ -10,55 +23,10 @@ const DEFAULT_MARKDOWN_PATH = resolve(ROOT, 'store/pulse.md');
 const USER_AGENT =
   'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36';
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const GA_MEASUREMENT_RE = /^G-[A-Z0-9]+$/;
-
 interface ExtensionMeta {
   id: string;
   name: string;
   listingUrl: string;
-}
-
-interface StoreReview {
-  id: string;
-  author: string;
-  rating: number;
-  text: string;
-  createdAt: string;
-  helpful: number;
-}
-
-interface StorePulse {
-  fetchedAt: string;
-  extensionId: string;
-  name: string;
-  listingUrl: string;
-  reviewsUrl: string;
-  version: string | null;
-  userCount: number | null;
-  rating: number | null;
-  reviewCount: number | null;
-  size: string | null;
-  updatedAt: string | null;
-  category: string | null;
-  storeGaMeasurementId: string | null;
-  privacyPolicyUrl: string | null;
-  reviews: StoreReview[];
-  previous: {
-    fetchedAt: string;
-    userCount: number | null;
-    rating: number | null;
-    reviewCount: number | null;
-    version: string | null;
-  } | null;
-  deltas: {
-    userCount: number | null;
-    rating: number | null;
-    reviewCount: number | null;
-    newReviewIds: string[];
-  };
-  suggestedActions: string[];
 }
 
 function fail(message: string): never {
@@ -204,7 +172,8 @@ function isListingPayload(
 
 function unixPairToIso(value: unknown): string | null {
   if (!Array.isArray(value) || typeof value[0] !== 'number') return null;
-  return new Date(value[0] * 1000).toISOString();
+  const date = new Date(value[0] * 1000);
+  return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
 function parseListing(data: unknown[], extensionId: string): {
@@ -227,13 +196,12 @@ function parseListing(data: unknown[], extensionId: string): {
   const reviewCount = typeof item[4] === 'number' ? item[4] : null;
   const userCount = typeof item[14] === 'number' ? item[14] : null;
   const categoryRow = item[11];
-  const category =
-    Array.isArray(categoryRow) && typeof categoryRow[0] === 'string'
-      ? categoryRow[0]
-      : null;
+  const category = Array.isArray(categoryRow)
+    ? validCategory(categoryRow[0])
+    : null;
 
-  const version = typeof data[13] === 'string' ? data[13] : null;
-  const size = typeof data[15] === 'string' ? data[15] : null;
+  const version = validVersion(data[13]);
+  const size = validSize(data[15]);
   const updatedAt = unixPairToIso(data[14]);
   const storeGaMeasurementId =
     typeof data[25] === 'string' && GA_MEASUREMENT_RE.test(data[25])
@@ -309,123 +277,6 @@ function readPreviousPulse(path: string): StorePulse | null {
   } catch {
     return null;
   }
-}
-
-function buildActions(input: {
-  userCount: number | null;
-  rating: number | null;
-  reviewCount: number | null;
-  reviews: StoreReview[];
-  newReviewIds: string[];
-  userDelta: number | null;
-  ratingDelta: number | null;
-}): string[] {
-  const actions: string[] = [];
-  const users = input.userCount ?? 0;
-  const reviews = input.reviewCount ?? 0;
-
-  if (users < 50 || reviews === 0) {
-    actions.push(
-      'Listing conversion is the bottleneck: expand the Chrome Web Store long description and screenshots before adding product surface area.',
-    );
-  }
-  if (input.userDelta !== null && input.userDelta < 0) {
-    actions.push(
-      `User count dropped by ${Math.abs(input.userDelta)}. Check uninstall reasons in the Developer Dashboard and recent reviews.`,
-    );
-  }
-  if (input.ratingDelta !== null && input.ratingDelta <= -0.2) {
-    actions.push(
-      `Average rating fell by ${input.ratingDelta.toFixed(2)}. Read new critical reviews and ship a focused fix.`,
-    );
-  }
-
-  const newCritical = input.reviews.filter(
-    (review) =>
-      input.newReviewIds.includes(review.id) &&
-      review.rating <= 3 &&
-      review.text.length > 0,
-  );
-  for (const review of newCritical) {
-    actions.push(
-      `New ${review.rating}★ review from ${review.author}: “${truncate(review.text, 160)}” — file a GitHub issue and fix if it names a real product gap.`,
-    );
-  }
-
-  if (actions.length === 0) {
-    actions.push(
-      'No urgent store-signal regressions. Re-read DESIGN.md and ship the smallest overlay improvement that helps people start a brief.',
-    );
-  }
-  return actions;
-}
-
-function truncate(text: string, max: number): string {
-  if (text.length <= max) return text;
-  return `${text.slice(0, max - 1)}…`;
-}
-
-function formatUsers(count: number | null): string {
-  if (count === null) return 'unknown';
-  return count.toLocaleString('en-US');
-}
-
-function formatRating(rating: number | null, reviewCount: number | null): string {
-  if (rating === null) return 'unrated';
-  const reviews = reviewCount === null ? '' : ` (${reviewCount} reviews)`;
-  return `${rating.toFixed(2)} / 5${reviews}`;
-}
-
-function signed(delta: number | null): string {
-  if (delta === null) return '—';
-  if (delta > 0) return `+${delta}`;
-  return String(delta);
-}
-
-function renderMarkdown(pulse: StorePulse): string {
-  const reviewLines =
-    pulse.reviews.length === 0
-      ? '- _No public reviews yet._'
-      : pulse.reviews
-          .map((review) => {
-            const fresh = pulse.deltas.newReviewIds.includes(review.id)
-              ? ' **new**'
-              : '';
-            return `- ${review.rating}★${fresh} — ${review.author} (${review.createdAt.slice(0, 10)}): ${review.text}`;
-          })
-          .join('\n');
-
-  const actions = pulse.suggestedActions
-    .map((action) => `- ${action}`)
-    .join('\n');
-
-  return `# Store pulse — Autovox flywheel
-
-Fetched **${pulse.fetchedAt}** from the public [Chrome Web Store listing](${pulse.listingUrl}).
-
-| Signal | Now | Δ vs last pulse |
-| --- | --- | --- |
-| Users (public count) | ${formatUsers(pulse.userCount)} | ${signed(pulse.deltas.userCount)} |
-| Rating | ${formatRating(pulse.rating, pulse.reviewCount)} | ${pulse.deltas.rating === null ? '—' : pulse.deltas.rating.toFixed(2)} |
-| Reviews | ${pulse.reviewCount ?? 0} | ${signed(pulse.deltas.reviewCount)} |
-| Listed version | ${pulse.version ?? 'unknown'} | ${pulse.previous?.version ?? '—'} → ${pulse.version ?? 'unknown'} |
-| Last store update | ${pulse.updatedAt ?? 'unknown'} | |
-| Category | ${pulse.category ?? 'unknown'} | |
-| Size | ${pulse.size ?? 'unknown'} | |
-
-This snapshot is **acquisition only** (store listing + public reviews). The flywheel dataset is money — see [docs/flywheel.md](../docs/flywheel.md). Autovox still has no backend and does not send product telemetry.
-
-${pulse.storeGaMeasurementId ? `CWS listing GA measurement id (store-page traffic, not in-extension events): \`${pulse.storeGaMeasurementId}\`.\n` : ''}
-## Reviews
-
-${reviewLines}
-
-## Suggested actions
-
-${actions}
-
-<!-- flywheel-marker -->
-`;
 }
 
 async function main(): Promise<void> {
