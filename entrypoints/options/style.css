@@ -576,6 +576,11 @@ button:disabled:hover {
   background: var(--av-face);
 }
 
+.btn-link:disabled:hover {
+  background: none;
+  color: var(--av-muted);
+}
+
 .spend {
   display: flex;
   flex-direction: column;

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { NewsReportScript } from '../utils/types';
-import { scriptToSpokenText } from '../utils/understand';
+import { scriptToSpokenText } from '../utils/spokenText';
 
 export function ScriptPreview({ script }: { script: NewsReportScript }) {
   const [open, setOpen] = useState(false);

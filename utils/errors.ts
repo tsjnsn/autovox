@@ -2,7 +2,7 @@ import {
   managedErrorData,
   type ManagedErrorCode,
 } from '../convex/lib/errors';
-import { OpenAIError } from './openai';
+import { OpenAIError } from './providerError';
 
 /** What a failed brief means for the listener; the meter label follows from it. */
 export type BriefErrorKind =
@@ -35,6 +35,17 @@ export class PageError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'PageError';
+  }
+}
+
+/** A failure another extension context already classified, relayed with its message. */
+export class RelayedError extends Error {
+  constructor(
+    message: string,
+    public kind: BriefErrorKind,
+  ) {
+    super(message);
+    this.name = 'RelayedError';
   }
 }
 
@@ -77,6 +88,7 @@ function statusKind(status: number | undefined): BriefErrorKind {
 export function briefErrorKind(error: unknown): BriefErrorKind {
   const managed = managedErrorData(error);
   if (managed) return MANAGED_KINDS[managed.code];
+  if (error instanceof RelayedError) return error.kind;
   if (error instanceof SetupError) return 'setup';
   if (error instanceof PageError) return 'page';
   if (error instanceof OpenAIError) return statusKind(error.status);

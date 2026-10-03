@@ -12,7 +12,7 @@ import {
   type AudioCodec,
   type VideoCodec,
 } from 'mediabunny';
-import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from '../openai';
+import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from '../pcmFormat';
 import { BoardRenderer } from './renderer';
 import type { ChalkLesson, ChalkSceneDrawing, ChalkTimeline } from './types';
 

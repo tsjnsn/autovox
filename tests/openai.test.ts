@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { LlmAuth } from "../utils/auth";
-import { createStructuredResponse, OpenAIError } from "../utils/openai";
+import { createStructuredResponse } from "../utils/openai";
+import { OpenAIError } from "../utils/providerError";
 
 const OPENROUTER: LlmAuth = {
   mode: "openrouter",

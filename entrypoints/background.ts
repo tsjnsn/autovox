@@ -3,7 +3,6 @@ import {
   clearTabBrief,
   clearTabIfUrlChanged,
   getTabBrief,
-  normalizePageUrl,
   setTabProgress,
 } from '../utils/briefState';
 import {
@@ -20,7 +19,7 @@ import {
 } from '../utils/managed';
 import type { LlmAuth } from '../utils/auth';
 import type { SessionFormat } from '../utils/chalk/types';
-import { managedError, managedErrorData } from '../convex/lib/errors';
+import { managedError } from '../convex/lib/errors';
 import type { ArticleTypeChoice } from '../utils/comprehension';
 import {
   briefErrorKind,
@@ -28,7 +27,27 @@ import {
   errorResponse,
   type ErrorResponse,
 } from '../utils/errors';
-import type { BriefProgress, ExtensionMessage } from '../utils/types';
+import { finishMoneySession } from '../utils/money';
+import {
+  attachNarrationUsage,
+  ensureManagedNarrationSession,
+  isNarrationCached,
+  runNarration,
+  streamNarrationSegment,
+  type ManagedNarrationRequest,
+  type ManagedNarrationSession,
+} from '../utils/narration';
+import { narrationCache } from '../utils/narrationCache';
+import { NARRATION_PORT, serveNarrationPort } from '../utils/narrationProtocol';
+import { credentialsKey, overlaySettings } from '../utils/overlaySettings';
+import { normalizePageUrl } from '../utils/pageUrl';
+import { coerceSettings, getSettings, SETTINGS_KEY } from '../utils/storage';
+import type {
+  BriefProgress,
+  BriefResult,
+  ExtensionMessage,
+  Settings,
+} from '../utils/types';
 
 const CONTEXT_MENU_VOX_PAGE = 'autovox-vox-page';
 const CONTEXT_MENU_CHALKBOARD = 'autovox-chalkboard-page';
@@ -39,14 +58,9 @@ const CONTEXT_MENU_CHALKBOARD = 'autovox-chalkboard-page';
  * or a new brief also stops scene drawing.
  */
 const abortByTab = new Map<number, AbortController>();
-type ManagedAuthRequest = Extract<
-  ExtensionMessage,
-  { type: 'GET_MANAGED_AUTH' }
->;
-type ManagedAuthResult = { sessionId: string; auth: LlmAuth };
 type ManagedAcquisition = {
   cancelled: boolean;
-  promise: Promise<ManagedAuthResult>;
+  promise: Promise<ManagedNarrationSession>;
 };
 const managedAcquisitionByTab = new Map<number, ManagedAcquisition>();
 
@@ -108,68 +122,36 @@ async function abortManagedSessionForTab(tabId: number): Promise<void> {
   }
 }
 
-async function acquireManagedAuthForTab(
+/**
+ * The tab's managed session for narration, opening a paid replay when the
+ * brief's session has ended; with `cached`, a fully saved narration needs none.
+ */
+async function acquireManagedSessionForTab(
   tabId: number,
-  request: ManagedAuthRequest,
-): Promise<ManagedAuthResult> {
+  request: ManagedNarrationRequest,
+  cached: boolean,
+): Promise<ManagedNarrationSession> {
   const existing = managedAcquisitionByTab.get(tabId);
   if (existing) return await existing.promise;
 
   let acquisition!: ManagedAcquisition;
-  const promise = (async (): Promise<ManagedAuthResult> => {
-    let sessionId = request.sessionId;
-    let auth = await getManagedSessionAuth(sessionId);
-    if (!auth) {
-      try {
-        await reportManagedLifecycle(sessionId, {
+  const promise = (async (): Promise<ManagedNarrationSession> => {
+    const session = await ensureManagedNarrationSession(request, cached, {
+      sessionAuth: getManagedSessionAuth,
+      report: reportManagedLifecycle,
+      openReplay: (dims) => openManagedSession({ kind: 'tts_replay', ...dims }),
+    });
+    if (acquisition.cancelled) {
+      if (session.sessionId) {
+        await reportManagedLifecycle(session.sessionId, {
           type: 'aborted',
           playbackSeconds: 0,
         });
-      } catch {
-        // A completed or expired session may already be terminal.
       }
-      let replay: Awaited<ReturnType<typeof openManagedSession>> | null =
-        null;
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 3; attempt++) {
-        try {
-          replay = await openManagedSession({
-            kind: 'tts_replay',
-            reportLength: request.reportLength,
-            voice: request.voice,
-            outputLanguage: request.outputLanguage,
-          });
-          break;
-        } catch (error) {
-          lastError = error;
-          if (
-            managedErrorData(error)?.code !== 'session_in_progress' ||
-            attempt === 2
-          ) {
-            throw error;
-          }
-          await new Promise((resolve) =>
-            setTimeout(resolve, 500 * (attempt + 1)),
-          );
-        }
-      }
-      if (!replay) throw lastError;
-      sessionId = replay.sessionId;
-      auth = replay.auth;
-      await reportManagedLifecycle(sessionId, {
-        type: 'script_ready',
-        estimatedSeconds: request.estimatedSeconds,
-      });
-    }
-    if (acquisition.cancelled) {
-      await reportManagedLifecycle(sessionId, {
-        type: 'aborted',
-        playbackSeconds: 0,
-      });
       throw new Error('Managed narration was cancelled');
     }
-    await setManagedTabSession(tabId, sessionId);
-    return { sessionId, auth };
+    if (session.sessionId) await setManagedTabSession(tabId, session.sessionId);
+    return session;
   })();
   acquisition = { cancelled: false, promise };
   managedAcquisitionByTab.set(tabId, acquisition);
@@ -182,10 +164,80 @@ async function acquireManagedAuthForTab(
   }
 }
 
+function assertManagedConfigured(): void {
+  if (!isManagedConfigured()) {
+    throw managedError(
+      'not_configured',
+      'Managed listening is not configured in this build',
+    );
+  }
+}
+
+/** The brief the overlay on this page was given. */
+async function savedTabBrief(
+  tabId: number,
+  url: string,
+): Promise<BriefResult | null> {
+  const state = await getTabBrief(tabId, url);
+  return state.result && sameSourceUrl(state.result.source.url, url)
+    ? state.result
+    : null;
+}
+
+/** For narration that was prepared as cached but whose saved audio is gone. */
+async function acquireManagedForNarration(
+  tabId: number,
+  brief: BriefResult,
+  settings: Settings,
+): Promise<{ sessionId: string; auth: LlmAuth }> {
+  assertManagedConfigured();
+  const sessionId =
+    (await getManagedTabSession(tabId)) ?? brief.managedSessionId;
+  if (!sessionId) throw new Error('Managed listening is unavailable');
+  const request: ManagedNarrationRequest = {
+    sessionId,
+    estimatedSeconds: brief.script.estimatedSeconds,
+    reportLength: brief.reportLength ?? settings.reportLength,
+    voice: settings.voice,
+    outputLanguage: settings.outputLanguage,
+  };
+  // A cached preparation still in flight resolves without a session.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const session = await acquireManagedSessionForTab(tabId, request, false);
+    if (session.sessionId !== null) return session;
+  }
+  throw new Error('Could not authorize managed narration');
+}
+
+async function broadcastToTabs(message: ExtensionMessage): Promise<void> {
+  const tabs = await browser.tabs.query({});
+  for (const tab of tabs) {
+    if (tab.id != null) notifyTab(tab.id, message);
+  }
+}
+
+let localStorageRestricted: Promise<void> = Promise.resolve();
+
+/**
+ * Keys and the spend ledger live in `storage.local`, which content scripts,
+ * running in the page's process, can read by default. Chrome versions that
+ * can't restrict it reject the call.
+ */
+async function restrictLocalStorage(): Promise<void> {
+  try {
+    await browser.storage.local.setAccessLevel({
+      accessLevel: 'TRUSTED_CONTEXTS',
+    });
+  } catch (error) {
+    console.warn('[autovox] could not restrict local storage to the extension', error);
+  }
+}
+
 async function sendOverlayMessage(
   tabId: number,
   type: 'TOGGLE_UI' | 'OPEN_UI',
 ): Promise<void> {
+  await localStorageRestricted;
   await ensureContentScript(tabId);
   const response = (await browser.tabs.sendMessage(tabId, { type })) as
     | { ok: true }
@@ -352,11 +404,62 @@ function registerContextMenus(): void {
 }
 
 export default defineBackground(() => {
+  localStorageRestricted = restrictLocalStorage();
+  void narrationCache()
+    .evict()
+    .catch((error: unknown) =>
+      console.warn('[autovox] could not sweep saved narration', error),
+    );
+
   browser.runtime.onInstalled.addListener(() => {
     registerContextMenus();
   });
+  // Saved briefs don't survive a browser restart, so neither can their audio be replayed.
+  browser.runtime.onStartup.addListener(() => {
+    void narrationCache()
+      .clear()
+      .catch((error: unknown) =>
+        console.warn('[autovox] could not clear saved narration', error),
+      );
+  });
   // Ensure menu exists after SW restart without reinstall
   registerContextMenus();
+
+  browser.storage.onChanged.addListener((changes, area) => {
+    const change = changes[SETTINGS_KEY];
+    if (area !== 'local' || !change) return;
+    const before = coerceSettings(change.oldValue);
+    const after = coerceSettings(change.newValue);
+    void broadcastToTabs({
+      type: 'OVERLAY_SETTINGS_CHANGED',
+      settings: overlaySettings(after),
+      credentialsChanged: credentialsKey(before) !== credentialsKey(after),
+    });
+  });
+
+  browser.runtime.onConnect.addListener((port) => {
+    if (port.name !== NARRATION_PORT) return;
+    const tabId = port.sender?.tab?.id;
+    const pageUrl = port.sender?.tab?.url ?? port.sender?.url;
+    if (tabId == null || !pageUrl) {
+      port.disconnect();
+      return;
+    }
+    serveNarrationPort(port, (request, signal, emit) =>
+      runNarration(request, signal, emit, {
+        loadBrief: () => savedTabBrief(tabId, pageUrl),
+        loadSettings: getSettings,
+        cache: narrationCache(),
+        managedAuth: getManagedSessionAuth,
+        acquireManaged: (brief, settings) =>
+          acquireManagedForNarration(tabId, brief, settings),
+        openSegment: streamNarrationSegment,
+        attachUsage: attachNarrationUsage,
+        onCacheError: (error) =>
+          console.warn('[autovox] could not save narration audio', error),
+      }),
+    );
+  });
 
   browser.contextMenus.onClicked.addListener((info, tab) => {
     const format: SessionFormat | null =
@@ -500,28 +603,58 @@ export default defineBackground(() => {
       return true;
     }
 
-    if (msg.type === 'GET_MANAGED_AUTH') {
+    if (msg.type === 'GET_OVERLAY_SETTINGS') {
+      void (async () => {
+        sendResponse(overlaySettings(await getSettings()));
+      })();
+      return true;
+    }
+
+    if (msg.type === 'PREPARE_MANAGED_NARRATION') {
       void (async () => {
         try {
-          if (!isManagedConfigured()) {
-            throw managedError(
-              'not_configured',
-              'Managed listening is not configured in this build',
-            );
-          }
-          if (sender.tab?.id == null) {
+          assertManagedConfigured();
+          const tabId = sender.tab?.id;
+          if (tabId == null) {
             throw new Error('Managed narration requires a browser tab');
           }
-          const managed = await acquireManagedAuthForTab(
-            sender.tab.id,
-            msg,
+          const url = sender.tab?.url ?? (await tabPageUrl(tabId));
+          const brief = await savedTabBrief(tabId, url);
+          const cached = brief
+            ? await isNarrationCached(brief, await getSettings(), narrationCache())
+            : false;
+          const session = await acquireManagedSessionForTab(
+            tabId,
+            {
+              sessionId: msg.sessionId,
+              estimatedSeconds: msg.estimatedSeconds,
+              reportLength: msg.reportLength,
+              voice: msg.voice,
+              outputLanguage: msg.outputLanguage,
+            },
+            cached,
           );
-          sendResponse({ ok: true, ...managed });
+          sendResponse({ ok: true, sessionId: session.sessionId });
         } catch (error) {
           sendResponse(
             errorResponse(error, 'Could not authorize managed narration'),
           );
         }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'FINISH_NARRATION_SPEND') {
+      void (async () => {
+        const outcomes = ['completed', 'fault', 'aborted'] as const;
+        if (
+          typeof msg.sessionId === 'string' &&
+          outcomes.includes(msg.outcome) &&
+          (msg.faultStage === 'tts' || msg.faultStage === 'none')
+        ) {
+          await finishMoneySession(msg.sessionId, msg.outcome, msg.faultStage);
+        }
+        sendResponse({ ok: true });
       })();
       return true;
     }

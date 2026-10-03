@@ -51,6 +51,10 @@ Autovox also keeps a **local spend ledger** on this profile: cost, model, stage 
 
 Short-lived managed provider keys are held in `chrome.storage.session`, not local or sync storage, and are disabled after the session or automatically expire.
 
+Provider keys and managed session keys are used only by the extension's background service worker, which also makes every provider request. The overlay Autovox shows on a page never receives a key, and where the browser supports it Autovox restricts its local storage to extension pages so the page's process can't read it.
+
+**Saved narration.** Once a narration has downloaded in full, its audio is saved in the extension's own IndexedDB on this profile, so playing the same brief again (reopening the overlay on that page, or switching back to the same voice) doesn't request it from the provider again; in managed mode, replaying saved audio uses no credit. Each saved narration is the audio plus a one-way hash of the script, voice, narration model, narrator instructions, language, and provider mode. The audio is the spoken script, so it reflects the article; no URL or title is stored with it. Saved narration is deleted when the browser restarts, 7 days after it was saved, or sooner, least recently played first, once it passes 128 MB (about 45 minutes of audio). **Clear saved narration** in Options deletes all of it. It never leaves your browser.
+
 ## Permissions
 
 - **activeTab / scripting:** temporary access to the tab you invoke Autovox on (toolbar icon or “Vox this page” context menu) so Autovox can inject the overlay and extract article text. Autovox does not request persistent access to all websites.

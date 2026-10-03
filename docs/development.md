@@ -50,7 +50,7 @@ Visual language: **Wire Meter** — see [DESIGN.md](../DESIGN.md).
 
 ## Auth for local testing
 
-BYOK testing: use **Connect with OpenRouter** in Options, or paste an OpenAI API key. Keys stay in `chrome.storage.local`.
+BYOK testing: use **Connect with OpenRouter** in Options, or paste an OpenAI API key. Keys stay in `chrome.storage.local`, which the background restricts to extension pages. The page overlay never sees them: it gets a key-free settings view (`GET_OVERLAY_SETTINGS`) and streams narration from the background over the `autovox-narration` port, so every provider request comes from the service worker. A narration that downloads in full is saved in the extension's IndexedDB and replayed from there; use **Clear saved narration** in Options to test the provider path again.
 
 Managed testing: follow [managed-listening.md](managed-listening.md). The public WXT variables enable the UI; server secrets belong only in Convex.
 

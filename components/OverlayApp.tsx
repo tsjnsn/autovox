@@ -12,23 +12,13 @@ import { BriefMeter } from './BriefMeter';
 import { Chalkboard } from './Chalkboard';
 import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
-import { samePageUrl } from '../utils/briefState';
-import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../utils/auth';
+import { samePageUrl } from '../utils/pageUrl';
 import {
   errorMeterLabel,
   type BriefErrorKind,
   type ErrorResponse,
 } from '../utils/errors';
-import {
-  addMoneyLine,
-  finishMoneySession,
-  getMoneyEvent,
-  startMoneySession,
-  usageToLineItem,
-} from '../utils/money';
-import { getSettings } from '../utils/storage';
-import { activeModels } from '../utils/models';
-import { buildNarratorInstructions, lessonTtsChunks } from '../utils/tts';
+import { lessonTtsChunks } from '../utils/tts';
 import {
   effectiveArticleTypeChoice,
   type ArticleTypeChoice,
@@ -39,15 +29,13 @@ import type {
   ChalkTimeline,
   SessionFormat,
 } from '../utils/chalk/types';
-import type { ProviderUsage } from '../utils/usage';
 import type {
   BriefDraft,
   BriefPhase,
   BriefProgress,
   BriefResult,
   ExtensionMessage,
-  ReportLength,
-  Settings,
+  OverlaySettings,
 } from '../utils/types';
 
 interface BriefStateResponse {
@@ -56,9 +44,18 @@ interface BriefStateResponse {
   running: boolean;
 }
 
-type ManagedAuthResponse =
-  | { ok: true; sessionId: string; auth: LlmAuth }
+/** A null session means the narration is saved and spends nothing. */
+type ManagedNarrationResponse =
+  | { ok: true; sessionId: string | null }
   | ErrorResponse;
+
+type ManagedNarration = { sessionId: string | null };
+
+async function getOverlaySettings(): Promise<OverlaySettings> {
+  return (await browser.runtime.sendMessage({
+    type: 'GET_OVERLAY_SETTINGS',
+  })) as OverlaySettings;
+}
 
 interface OverlayAppProps {
   onClose: () => void;
@@ -113,7 +110,7 @@ function meterLabel(
 }
 
 export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
-  const [settings, setSettings] = useState<Settings | null>(null);
+  const [settings, setSettings] = useState<OverlaySettings | null>(null);
   const [phase, setPhase] = useState<BriefPhase>('idle');
   const [extracting, setExtracting] = useState(false);
   const [sourceWords, setSourceWords] = useState<number | null>(null);
@@ -124,8 +121,9 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const [fault, setFault] = useState<BriefFault | null>(null);
   const [streamKey, setStreamKey] = useState(0);
   const [narrating, setNarrating] = useState(false);
-  const [managedPlayerAuth, setManagedPlayerAuth] =
-    useState<LlmAuth | null>(null);
+  const [managedNarration, setManagedNarration] =
+    useState<ManagedNarration | null>(null);
+  const [authRevision, setAuthRevision] = useState(0);
   const [timeline, setTimeline] = useState<ChalkTimeline>(EMPTY_TIMELINE);
   const clockRef = useRef<(() => number) | null>(null);
   const [narrationPcm, setNarrationPcm] = useState<Uint8Array | null>(null);
@@ -137,25 +135,25 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
 
   const hasScriptRef = useRef(false);
   const moneySessionRef = useRef<string | null>(null);
-  const settingsRef = useRef<Settings | null>(null);
   const faultRef = useRef<BriefFault | null>(null);
   const managedRuntimeSessionRef = useRef<string | null>(null);
+  const managedNarrationRef = useRef<ManagedNarration | null>(null);
   useLayoutEffect(() => {
     hasScriptRef.current = Boolean(result);
-    settingsRef.current = settings;
     faultRef.current = fault;
+    managedNarrationRef.current = managedNarration;
   });
 
   useEffect(() => {
     moneySessionRef.current = result?.moneySessionId ?? null;
   }, [result?.moneySessionId]);
 
-  /** Every result change already clears managed auth; settings changes go through here. */
-  const applySettings = useCallback((next: Settings) => {
+  /** Every result change already clears managed narration; settings changes go through here. */
+  const applySettings = useCallback((next: OverlaySettings) => {
     setSettings(next);
     if (next.providerMode !== 'managed') {
       managedRuntimeSessionRef.current = null;
-      setManagedPlayerAuth(null);
+      setManagedNarration(null);
     }
   }, []);
 
@@ -170,17 +168,17 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     let cancelled = false;
     void (async () => {
       const response = (await browser.runtime.sendMessage({
-        type: 'GET_MANAGED_AUTH',
+        type: 'PREPARE_MANAGED_NARRATION',
         sessionId: result.managedSessionId,
         estimatedSeconds: result.script.estimatedSeconds,
         reportLength:
           result.reportLength ?? settings.reportLength,
         voice: settings.voice,
         outputLanguage: settings.outputLanguage,
-      })) as ManagedAuthResponse | undefined;
+      })) as ManagedNarrationResponse | undefined;
       if (cancelled) return;
       if (!response?.ok) {
-        setManagedPlayerAuth(null);
+        setManagedNarration(null);
         setFault(
           response
             ? { message: response.error, kind: response.kind }
@@ -190,8 +188,13 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         setNarrating(false);
         return;
       }
+      // Narration on an ended session restarts once it has a replacement.
+      const known = managedNarrationRef.current?.sessionId ?? null;
       managedRuntimeSessionRef.current = response.sessionId;
-      setManagedPlayerAuth(response.auth);
+      setManagedNarration({ sessionId: response.sessionId });
+      if (known !== null && known !== response.sessionId) {
+        setAuthRevision((revision) => revision + 1);
+      }
     })();
 
     return () => {
@@ -207,42 +210,9 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     settings?.outputLanguage,
   ]);
 
-  const attachTtsUsage = useCallback(async (
-    usage: ProviderUsage,
-    originalReportLength: ReportLength | undefined,
-  ) => {
-    const latest = settingsRef.current;
-    if (!latest) return;
-
-    let authMode: 'managed' | LlmAuth['mode'];
-    if (latest.providerMode === 'managed') {
-      authMode = 'managed';
-    } else {
-      try {
-        authMode = resolveLlmAuth(latest).mode;
-      } catch {
-        return;
-      }
-    }
-
-    let sessionId = moneySessionRef.current;
-    const existing = sessionId ? await getMoneyEvent(sessionId) : null;
-    if (!existing || existing.outcome !== 'open') {
-      sessionId = await startMoneySession({
-        kind: 'tts_replay',
-        reportLength: originalReportLength ?? latest.reportLength,
-        voice: latest.voice,
-        outputLanguage: latest.outputLanguage,
-        authMode,
-      });
-      moneySessionRef.current = sessionId;
-    }
-    if (!sessionId) return;
-
-    await addMoneyLine(
-      sessionId,
-      usageToLineItem('tts', activeModels(latest).tts, usage),
-    );
+  const handleManagedSession = useCallback((sessionId: string) => {
+    managedRuntimeSessionRef.current = sessionId;
+    setManagedNarration({ sessionId });
   }, []);
 
   const finishTtsSession = useCallback(
@@ -252,7 +222,12 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     ) => {
       const sessionId = moneySessionRef.current;
       if (!sessionId) return;
-      await finishMoneySession(sessionId, outcome, faultStage);
+      await browser.runtime.sendMessage({
+        type: 'FINISH_NARRATION_SPEND',
+        sessionId,
+        outcome,
+        faultStage,
+      } satisfies ExtensionMessage);
     },
     [],
   );
@@ -296,34 +271,18 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     [],
   );
 
-  const hasAuth = settings ? hasLlmAuth(settings) : null;
+  const hasAuth = settings ? settings.hasAuth : null;
   const busy = extracting || narrating;
-  const playerAuth =
-    result && settings?.providerMode === 'managed'
-      ? managedPlayerAuth
-      : result && settings && hasLlmAuth(settings)
-      ? (() => {
-          try {
-            return resolveLlmAuth(settings);
-          } catch {
-            return null;
-          }
-        })()
-      : null;
-  const hasPlayer = Boolean(result && playerAuth);
+  const hasPlayer = Boolean(
+    result &&
+      settings &&
+      (settings.providerMode === 'managed' ? managedNarration : settings.hasAuth),
+  );
   const lesson = result?.format === 'chalkboard' ? result.lesson : undefined;
   const lessonChunks = useMemo(
     () => (lesson ? lessonTtsChunks(lesson) : undefined),
     [lesson],
   );
-  const narratorInstructions =
-    result && settings && (lesson || result.articleType)
-      ? buildNarratorInstructions({
-          articleType: result.articleType?.type,
-          chalkboard: Boolean(lesson),
-          outputLanguage: result.outputLanguage ?? settings.outputLanguage,
-        })
-      : undefined;
   const articleTypeChoice = effectiveArticleTypeChoice(
     articleTypeOverride,
     result?.articleType ?? null,
@@ -379,7 +338,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     const resetLocalBrief = () => {
       moneySessionRef.current = null;
       managedRuntimeSessionRef.current = null;
-      setManagedPlayerAuth(null);
+      setManagedNarration(null);
       setTimeline(EMPTY_TIMELINE);
       setResult(null);
       setPhase('idle');
@@ -392,7 +351,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     };
 
     const loadBriefState = async () => {
-      const loaded = await getSettings();
+      const loaded = await getOverlaySettings();
       applySettings(loaded);
 
       const state = (await browser.runtime.sendMessage({
@@ -463,7 +422,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         setSourceWords(null);
         moneySessionRef.current = message.result.moneySessionId ?? null;
         managedRuntimeSessionRef.current = null;
-        setManagedPlayerAuth(null);
+        setManagedNarration(null);
         setTimeline(EMPTY_TIMELINE);
         setResult(withScenes(message.result, sceneBacklogRef.current));
         setPhase('generating_audio');
@@ -489,29 +448,23 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         setDraft(null);
         setNarrating(false);
       }
-    };
-
-    const onStorageChanged: Parameters<
-      typeof browser.storage.onChanged.addListener
-    >[0] = (changes, area) => {
-      if (area !== 'local') return;
-      if (!changes.autovoxSettings) return;
-      void getSettings().then((loaded) => {
-        applySettings(loaded);
-        if (hasLlmAuth(loaded) && faultRef.current?.kind === 'setup') {
+      if (message.type === 'OVERLAY_SETTINGS_CHANGED') {
+        applySettings(message.settings);
+        if (message.credentialsChanged) {
+          setAuthRevision((revision) => revision + 1);
+        }
+        if (message.settings.hasAuth && faultRef.current?.kind === 'setup') {
           setFault(null);
           setPhase((prev) => (prev === 'error' ? 'idle' : prev));
         }
-      });
+      }
     };
 
     browser.runtime.onMessage.addListener(onMessage);
-    browser.storage.onChanged.addListener(onStorageChanged);
     // After the initial load, so its stale state can't overwrite the first BRIEF_PROGRESS.
     void loadBriefState().finally(() => signalReady());
     return () => {
       browser.runtime.onMessage.removeListener(onMessage);
-      browser.storage.onChanged.removeListener(onStorageChanged);
     };
   }, [applySettings]);
 
@@ -520,9 +473,9 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   };
 
   const startBrief = async (format: SessionFormat = 'brief') => {
-    const latest = await getSettings();
+    const latest = await getOverlaySettings();
     applySettings(latest);
-    if (!hasLlmAuth(latest)) {
+    if (!latest.hasAuth) {
       setFault({
         message: 'Connect with OpenRouter or add an OpenAI API key in Options first.',
         kind: 'setup',
@@ -534,7 +487,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     setFault(null);
     moneySessionRef.current = null;
     managedRuntimeSessionRef.current = null;
-    setManagedPlayerAuth(null);
+    setManagedNarration(null);
     setTimeline(EMPTY_TIMELINE);
     handleNarration(null);
     setResult(null);
@@ -569,7 +522,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     await browser.runtime.sendMessage({ type: 'CLEAR_BRIEF' });
     moneySessionRef.current = null;
     managedRuntimeSessionRef.current = null;
-    setManagedPlayerAuth(null);
+    setManagedNarration(null);
     setTimeline(EMPTY_TIMELINE);
     handleNarration(null);
     setResult(null);
@@ -615,12 +568,6 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     void reportManagedPlayback({ type: 'aborted', playbackSeconds });
   }, [finishTtsSession, reportManagedPlayback]);
 
-  const handleUsage = useCallback(
-    (usage: ProviderUsage) =>
-      attachTtsUsage(usage, result?.reportLength),
-    [attachTtsUsage, result?.reportLength],
-  );
-
   const label =
     hasAuth === false ? 'Needs setup' : meterLabel(phase, fault, extracting);
 
@@ -653,21 +600,22 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
             <StreamingPlayer
               key={`${streamKey}:${settings!.providerMode}`}
               script={result!.script}
+              briefId={result!.moneySessionId ?? null}
+              authRevision={authRevision}
+              managedSessionId={managedNarration?.sessionId ?? null}
+              moneySessionRef={moneySessionRef}
+              onManagedSession={handleManagedSession}
               chunks={lessonChunks}
-              ttsInstructions={narratorInstructions}
-              prefetch={lesson ? 2 : 0}
               onChunkTimeline={lesson ? setTimeline : undefined}
               clockRef={lesson ? clockRef : undefined}
               onNarration={lesson ? handleNarration : undefined}
-              auth={playerAuth!}
-              model={activeModels(settings!).tts}
+              model={settings!.narrationModel}
               voice={settings!.voice}
               outputLanguage={result!.outputLanguage ?? settings!.outputLanguage}
               onPlaying={handlePlaying}
               onDone={handleDone}
               onError={handleError}
               onAbort={handleAbort}
-              onUsage={handleUsage}
             />
             <p className="autovox-source">
               {result!.source.siteName ? `${result!.source.siteName} · ` : ''}

@@ -52,6 +52,7 @@ import {
   type QualityLevel,
 } from '../../utils/models';
 import { OUTPUT_LANGUAGES, type OutputLanguage } from '../../utils/languages';
+import { narrationCache, narrationMinutes } from '../../utils/narrationCache';
 import { getSettings, saveSettings } from '../../utils/storage';
 import {
   DEFAULT_SETTINGS,
@@ -726,6 +727,73 @@ function SpendPanel({ spend }: { spend: MoneySummary | null }) {
   );
 }
 
+type NarrationUsage = { entries: number; bytes: number };
+
+function savedNarrationSummary(usage: NarrationUsage | null): string {
+  if (!usage) return '—';
+  if (usage.entries === 0) return 'Nothing saved.';
+  const minutes = Math.max(1, Math.round(narrationMinutes(usage.bytes)));
+  return `${countOf(usage.entries, 'narration')} saved, ${minutes} min of audio.`;
+}
+
+function SavedNarrationPanel({ flash }: { flash: (message: string) => void }) {
+  const [usage, setUsage] = useState<NarrationUsage | null>(null);
+  const [clearing, setClearing] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    narrationCache()
+      .usage()
+      .then(
+        (next) => {
+          if (!cancelled) setUsage(next);
+        },
+        (error: unknown) => {
+          console.warn('[autovox] could not read saved narration', error);
+        },
+      );
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const clear = async () => {
+    setClearing(true);
+    try {
+      await narrationCache().clear();
+      setUsage({ entries: 0, bytes: 0 });
+      flash('Saved narration cleared');
+    } catch (error) {
+      console.warn('[autovox] could not clear saved narration', error);
+      flash('Could not clear saved narration');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <section className="auth-block" aria-labelledby="saved-narration-title">
+      <h2 id="saved-narration-title" className="auth-block__title">
+        Saved narration
+      </h2>
+      <p className="hint">
+        Playing a brief again on its page uses audio saved in this browser, at
+        no cost. It is deleted when the browser restarts, after 7 days, or when
+        space runs short.
+      </p>
+      <p className="hint">{savedNarrationSummary(usage)}</p>
+      <button
+        type="button"
+        className="btn-link"
+        disabled={clearing || usage?.entries === 0}
+        onClick={() => void clear()}
+      >
+        Clear saved narration
+      </button>
+    </section>
+  );
+}
+
 const REPORT_LENGTHS: { id: ReportLength; label: string; minutes: string }[] = [
   { id: 'short', label: 'Short', minutes: '1–1.5 min' },
   { id: 'standard', label: 'Standard', minutes: '2–3.5 min' },
@@ -1046,6 +1114,8 @@ export default function App() {
               {DEFAULT_TTS_MODEL} to narrate.
             </p>
           )}
+
+          <SavedNarrationPanel flash={flash} />
         </div>
       </main>
     </div>

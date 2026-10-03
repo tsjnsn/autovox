@@ -1,4 +1,4 @@
-import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from './openai';
+import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from './pcmFormat';
 
 /** Start playback after buffering this much PCM (~200 ms). */
 const START_BUFFER_BYTES = Math.floor(

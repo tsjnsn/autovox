@@ -5,8 +5,6 @@ import {
 } from './auth';
 import {
   clearTabBrief,
-  normalizePageUrl,
-  samePageUrl,
   saveTabBriefResult,
   saveTabChalkDrawing,
   setTabMoneySession,
@@ -43,6 +41,7 @@ import {
 import { PageError, SetupError } from './errors';
 import { languageFromDetection, type OutputLanguage } from './languages';
 import type { StreamProgress } from './openai';
+import { normalizePageUrl, samePageUrl } from './pageUrl';
 import { getSettings } from './storage';
 import type {
   BriefDraft,

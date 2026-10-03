@@ -12,16 +12,8 @@ import {
   parseProviderUsage,
   type ProviderUsage,
 } from './usage';
-
-export class OpenAIError extends Error {
-  constructor(
-    message: string,
-    public status?: number,
-  ) {
-    super(message);
-    this.name = 'OpenAIError';
-  }
-}
+import { base64ToBytes } from './pcmFormat';
+import { OpenAIError } from './providerError';
 
 /** Errors inside an accepted stream carry a provider code instead of an HTTP status. */
 function streamErrorStatus(code: unknown): number | undefined {
@@ -261,19 +253,6 @@ function readOutputText(data: unknown): string | null {
     }
   }
   return null;
-}
-
-/** OpenAI PCM16: 24 kHz, 16-bit signed LE, mono */
-export const PCM_SAMPLE_RATE = 24_000;
-export const PCM_BYTES_PER_SAMPLE = 2;
-
-function base64ToBytes(base64: string): Uint8Array {
-  const binary = atob(base64);
-  const bytes = new Uint8Array(binary.length);
-  for (let i = 0; i < binary.length; i++) {
-    bytes[i] = binary.charCodeAt(i);
-  }
-  return bytes;
 }
 
 /**

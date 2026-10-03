@@ -60,6 +60,19 @@ export interface Settings {
   ttsModel: string;
 }
 
+/** What the page overlay may know about settings: no credentials. */
+export interface OverlaySettings {
+  providerMode: ProviderMode;
+  voice: VoiceId;
+  reportLength: ReportLength;
+  outputLanguage: OutputLanguage;
+  articleType: ArticleTypeChoice;
+  /** Usable credentials or a configured managed build. */
+  hasAuth: boolean;
+  /** The narration model a brief runs with. */
+  narrationModel: string;
+}
+
 export interface ExtractedArticle {
   title: string;
   byline: string | null;
@@ -152,8 +165,12 @@ export type ExtensionMessage =
   | { type: 'GET_MANAGED_ACCOUNT' }
   | { type: 'ENSURE_MANAGED_ACCOUNT' }
   | { type: 'START_MANAGED_CHECKOUT' }
+  /**
+   * Readies the tab's managed session for narration, opening a replay session
+   * when its key is gone. A fully cached narration needs no session.
+   */
   | {
-      type: 'GET_MANAGED_AUTH';
+      type: 'PREPARE_MANAGED_NARRATION';
       sessionId: string;
       estimatedSeconds: number;
       reportLength: ReportLength;
@@ -164,6 +181,21 @@ export type ExtensionMessage =
       type: 'MANAGED_LIFECYCLE';
       sessionId: string;
       event: ManagedLifecycleEvent;
+    }
+  | { type: 'GET_OVERLAY_SETTINGS' }
+  /** Sent to every tab when settings change. */
+  | {
+      type: 'OVERLAY_SETTINGS_CHANGED';
+      settings: OverlaySettings;
+      /** The provider key or mode changed, so narration must restart. */
+      credentialsChanged: boolean;
+    }
+  /** The overlay's narration ended; closes its spend session in the ledger. */
+  | {
+      type: 'FINISH_NARRATION_SPEND';
+      sessionId: string;
+      outcome: 'completed' | 'fault' | 'aborted';
+      faultStage: 'tts' | 'none';
     }
   | {
       type: 'START_BRIEF';

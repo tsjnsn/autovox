@@ -7,29 +7,36 @@ import {
   useState,
   type MutableRefObject,
 } from 'react';
-import { authCacheKey, type LlmAuth } from '../utils/auth';
 import {
   briefErrorKind,
   errorMeterLabel,
   type BriefErrorKind,
 } from '../utils/errors';
-import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from '../utils/openai';
+import { NARRATION_PORT, streamNarration } from '../utils/narrationProtocol';
+import { PCM_BYTES_PER_SAMPLE, PCM_SAMPLE_RATE } from '../utils/pcmFormat';
 import {
   concatPcmChunks,
   pcmDurationSeconds,
   PcmStreamPlayer,
 } from '../utils/pcmPlayer';
-import { prefetchInOrder } from '../utils/prefetch';
-import { buildTtsChunks, streamSegmentPcm } from '../utils/tts';
+import { buildTtsChunks } from '../utils/tts';
 import type { ChalkTimeline } from '../utils/chalk/types';
 import type { OutputLanguage } from '../utils/languages';
-import type { ProviderUsage } from '../utils/usage';
 import type { NewsReportScript, VoiceId } from '../utils/types';
 import { MutedIcon, PauseIcon, PlayIcon, VolumeIcon } from './TransportIcons';
 
 interface StreamingPlayerProps {
   script: NewsReportScript;
-  auth: LlmAuth;
+  /** The brief being narrated; the background narrates only the tab's saved brief. */
+  briefId: string | null;
+  /** Bumped when narration must restart on different credentials. */
+  authRevision: number;
+  /** Managed session to spend through; null when narration didn't need one yet. */
+  managedSessionId: string | null;
+  /** Spend session for TTS lines; moved to a replay session once the brief's closes. */
+  moneySessionRef: MutableRefObject<string | null>;
+  /** Narration opened this managed session. */
+  onManagedSession?: (sessionId: string) => void;
   model: string;
   voice: VoiceId;
   outputLanguage: OutputLanguage;
@@ -41,14 +48,8 @@ interface StreamingPlayerProps {
     kind: BriefErrorKind,
   ) => void;
   onAbort?: (playbackSeconds: number) => void;
-  /** Fired once per TTS API segment that actually spent. Cache replay does not fire. */
-  onUsage?: (usage: ProviderUsage) => void | Promise<void>;
   /** Narration requests in order; defaults to the script split for TTS. */
   chunks?: string[];
-  /** Voice direction; defaults to the news anchor. */
-  ttsInstructions?: string;
-  /** Later chunks to download while the current one streams. */
-  prefetch?: number;
   /** Media-time span of each chunk, re-published as downloads progress. */
   onChunkTimeline?: (timeline: ChalkTimeline) => void;
   /** Filled with a reader for the playhead (seconds), for per-frame sync. */
@@ -77,7 +78,11 @@ function bytesToSeconds(bytes: number): number {
 
 export function StreamingPlayer({
   script,
-  auth,
+  briefId,
+  authRevision,
+  managedSessionId,
+  moneySessionRef,
+  onManagedSession,
   model,
   voice,
   outputLanguage,
@@ -85,10 +90,7 @@ export function StreamingPlayer({
   onDone,
   onError,
   onAbort,
-  onUsage,
   chunks,
-  ttsInstructions,
-  prefetch = 0,
   onChunkTimeline,
   clockRef,
   onNarration,
@@ -116,20 +118,15 @@ export function StreamingPlayer({
   const onDoneRef = useRef(onDone);
   const onErrorRef = useRef(onError);
   const onAbortRef = useRef(onAbort);
-  const onUsageRef = useRef(onUsage);
+  const onManagedSessionRef = useRef(onManagedSession);
   const onChunkTimelineRef = useRef(onChunkTimeline);
   const onNarrationRef = useRef(onNarration);
 
   const scriptKey = `${script.headline}\n${script.lede}\n${script.segments.join('\n')}\n${chunks?.join('\n') ?? ''}`;
-  const authKey = authCacheKey(auth);
   const scriptRef = useRef(script);
-  const authRef = useRef(auth);
-  const modelRef = useRef(model);
-  const voiceRef = useRef(voice);
-  const outputLanguageRef = useRef(outputLanguage);
+  const briefIdRef = useRef(briefId);
+  const managedSessionIdRef = useRef(managedSessionId);
   const chunksRef = useRef(chunks);
-  const ttsInstructionsRef = useRef(ttsInstructions);
-  const prefetchRef = useRef(prefetch);
 
   const estimatedSeconds = Math.max(1, script.estimatedSeconds || 120);
 
@@ -154,15 +151,11 @@ export function StreamingPlayer({
     onDoneRef.current = onDone;
     onErrorRef.current = onError;
     onAbortRef.current = onAbort;
-    onUsageRef.current = onUsage;
+    onManagedSessionRef.current = onManagedSession;
     chunksRef.current = chunks;
-    ttsInstructionsRef.current = ttsInstructions;
-    prefetchRef.current = prefetch;
     scriptRef.current = script;
-    authRef.current = auth;
-    modelRef.current = model;
-    voiceRef.current = voice;
-    outputLanguageRef.current = outputLanguage;
+    briefIdRef.current = briefId;
+    managedSessionIdRef.current = managedSessionId;
     durationRef.current = duration;
     bufferedSecondsRef.current = bufferedSeconds;
     positionRef.current = position;
@@ -401,7 +394,6 @@ export function StreamingPlayer({
     setTransportPhase('loading');
 
     const texts = chunksRef.current ?? buildTtsChunks(scriptRef.current);
-    const instructions = ttsInstructionsRef.current;
     const starts: (number | null)[] = texts.map(() => null);
     const ends: (number | null)[] = texts.map(() => null);
     const publishTimeline = () =>
@@ -412,21 +404,23 @@ export function StreamingPlayer({
       await player.resume().catch(() => undefined);
 
       let current = -1;
-      const events = prefetchInOrder(
-        texts.length,
-        (i) =>
-          streamSegmentPcm({
-            auth: authRef.current,
-            model: modelRef.current,
-            voice: voiceRef.current,
-            outputLanguage: outputLanguageRef.current,
-            instructions,
-            text: texts[i]!,
-            signal: abort.signal,
-            onUsage: (usage) => onUsageRef.current?.(usage),
-          }),
-        prefetchRef.current,
-      );
+      const events = streamNarration({
+        connect: () => browser.runtime.connect({ name: NARRATION_PORT }),
+        request: {
+          briefId: briefIdRef.current,
+          moneySessionId: moneySessionRef.current,
+          managedSessionId: managedSessionIdRef.current,
+        },
+        expectedSegments: texts.length,
+        signal: abort.signal,
+        onMoneySession: (sessionId) => {
+          moneySessionRef.current = sessionId;
+        },
+        onManagedSession: (sessionId) => {
+          managedSessionIdRef.current = sessionId;
+          onManagedSessionRef.current?.(sessionId);
+        },
+      });
       for await (const event of events) {
         if (abort.signal.aborted || runId !== runIdRef.current) return;
 
@@ -493,6 +487,7 @@ export function StreamingPlayer({
     clearCache,
     estimatedSeconds,
     markCacheComplete,
+    moneySessionRef,
     setTransportPhase,
     updateBufferFromBytes,
   ]);
@@ -510,7 +505,7 @@ export function StreamingPlayer({
       runIdRef.current += 1;
       streamingRef.current = false;
     };
-  }, [scriptKey, authKey, model, voice, outputLanguage, ttsInstructions]);
+  }, [scriptKey, authRevision, model, voice, outputLanguage]);
 
   const toggle = async () => {
     const player = playerRef.current;

@@ -8,7 +8,7 @@ import {
   PageError,
   SetupError,
 } from "../utils/errors";
-import { OpenAIError } from "../utils/openai";
+import { OpenAIError } from "../utils/providerError";
 
 void test("an OpenRouter upstream outage reads as Retry, not Needs setup", () => {
   const outage = new OpenAIError(

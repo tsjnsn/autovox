@@ -1,10 +1,7 @@
-import type { LlmAuth } from './auth';
 import { ARTICLE_TYPE_SPECS, type ArticleType } from './comprehension';
 import { ttsLanguageInstruction, type OutputLanguage } from './languages';
-import { streamAudioChatPcm } from './openai';
-import type { ProviderUsage } from './usage';
-import type { NewsReportScript, VoiceId } from './types';
-import { scriptToSpokenText } from './understand';
+import type { NewsReportScript } from './types';
+import { scriptToSpokenText } from './spokenText';
 import { flattenBeats, type ChalkLesson } from './chalk/types';
 
 const MAX_CHARS = 2800;
@@ -136,28 +133,4 @@ export function lessonTtsChunks(lesson: ChalkLesson): string[] {
     chunks[0] = `${lesson.title}.\n\n${chunks[0]}`;
   }
   return chunks;
-}
-
-export function streamSegmentPcm(options: {
-  auth: LlmAuth;
-  model: string;
-  voice: VoiceId;
-  text: string;
-  outputLanguage: OutputLanguage;
-  /** System voice direction; defaults to the news anchor. */
-  instructions?: string;
-  signal?: AbortSignal;
-  onUsage?: (usage: ProviderUsage) => void | Promise<void>;
-}): AsyncGenerator<Uint8Array, void, unknown> {
-  return streamAudioChatPcm({
-    auth: options.auth,
-    model: options.model,
-    voice: options.voice,
-    input: scriptMessage(options.text),
-    instructions:
-      options.instructions ??
-      buildNewsAnchorInstructions(options.outputLanguage),
-    signal: options.signal,
-    onUsage: options.onUsage,
-  });
 }

@@ -7,7 +7,7 @@ import {
   type Settings,
 } from './types';
 
-const SETTINGS_KEY = 'autovoxSettings';
+export const SETTINGS_KEY = 'autovoxSettings';
 
 function coerceModel(value: unknown, fallback: string): string {
   return typeof value === 'string' && value.trim() ? value.trim() : fallback;
@@ -15,7 +15,12 @@ function coerceModel(value: unknown, fallback: string): string {
 
 export async function getSettings(): Promise<Settings> {
   const stored = await browser.storage.local.get(SETTINGS_KEY);
-  const value = stored[SETTINGS_KEY] as Partial<Settings> | undefined;
+  return coerceSettings(stored[SETTINGS_KEY]);
+}
+
+/** Stored settings (possibly partial or from an older version) with defaults filled in. */
+export function coerceSettings(stored: unknown): Settings {
+  const value = stored as Partial<Settings> | undefined;
   const merged = { ...DEFAULT_SETTINGS, ...value };
   const configuredDefault: ProviderMode =
     import.meta.env.WXT_PUBLIC_MANAGED_ENABLED === 'true' &&

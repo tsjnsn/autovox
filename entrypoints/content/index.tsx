@@ -11,8 +11,8 @@ import { keepOnTop } from '../../utils/topLayer';
 import type { ExtensionMessage } from '../../utils/types';
 
 /**
- * Covers the shadow root's CSS, React's first commit, a storage read and one
- * round trip to the already-awake background. That normally takes well under
+ * Covers the shadow root's CSS, React's first commit and two round trips to
+ * the already-awake background. That normally takes well under
  * a second; the slack absorbs a page whose main thread is busy for a while.
  */
 const READY_TIMEOUT_MS = 10_000;
