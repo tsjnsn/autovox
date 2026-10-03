@@ -13,19 +13,21 @@ export default defineContentScript({
   cssInjectionMode: 'ui',
 
   async main(ctx) {
-    let mounted = false;
     let ui: Awaited<ReturnType<typeof createShadowRootUi>> | null = null;
+    /** Set while the overlay is open or opening; settles once it is listening. */
+    let ready: Promise<void> | null = null;
+    let abandonReady: ((reason: Error) => void) | null = null;
 
     const removeUi = () => {
+      abandonReady?.(new Error('Overlay closed before it was ready'));
+      abandonReady = null;
+      ready = null;
       ui?.remove();
       ui = null;
-      mounted = false;
     };
 
-    const mountUi = async () => {
-      if (mounted && ui) return;
-
-      ui = await createShadowRootUi(ctx, {
+    const openUi = async (onReady: () => void, isCurrent: () => boolean) => {
+      const created = await createShadowRootUi(ctx, {
         name: 'autovox-overlay',
         position: 'inline',
         anchor: 'body',
@@ -41,7 +43,7 @@ export default defineContentScript({
           host.append(app);
 
           const root = ReactDOM.createRoot(app);
-          root.render(<OverlayApp onClose={removeUi} />);
+          root.render(<OverlayApp onClose={removeUi} onReady={onReady} />);
           return {
             root,
             releaseTop: keepOnTop(shadowHost),
@@ -55,12 +57,31 @@ export default defineContentScript({
         },
       });
 
-      ui.mount();
-      mounted = true;
+      if (!isCurrent()) return;
+      created.mount();
+      ui = created;
+    };
+
+    const mountUi = (): Promise<void> => {
+      if (ready) return ready;
+      const opening: Promise<void> = new Promise<void>((resolve, reject) => {
+        abandonReady = reject;
+        void openUi(resolve, () => ready === opening).catch(
+          (error: unknown) => {
+            if (ready === opening) {
+              ready = null;
+              abandonReady = null;
+            }
+            reject(error);
+          },
+        );
+      });
+      ready = opening;
+      return opening;
     };
 
     const toggleUi = async () => {
-      if (mounted) {
+      if (ready) {
         removeUi();
         return { open: false };
       }

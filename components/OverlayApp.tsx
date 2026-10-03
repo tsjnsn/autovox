@@ -49,6 +49,8 @@ type ManagedAuthResponse =
 
 interface OverlayAppProps {
   onClose: () => void;
+  /** Called once BRIEF_* messages reach the overlay. */
+  onReady?: () => void;
 }
 
 const EMPTY_TIMELINE: ChalkTimeline = { starts: [], ends: [] };
@@ -97,7 +99,7 @@ function meterLabel(
   return '';
 }
 
-export function OverlayApp({ onClose }: OverlayAppProps) {
+export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [phase, setPhase] = useState<BriefPhase>('idle');
   const [extracting, setExtracting] = useState(false);
@@ -353,7 +355,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
       setNarrating(false);
     };
 
-    void (async () => {
+    const loadBriefState = async () => {
       const loaded = await getSettings();
       setSettings(loaded);
 
@@ -383,7 +385,7 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
         setPhase('idle');
         setExtracting(false);
       }
-    })();
+    };
 
     const onMessage = (message: ExtensionMessage) => {
       if (message.type === 'BRIEF_RESET') {
@@ -469,6 +471,8 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
 
     browser.runtime.onMessage.addListener(onMessage);
     browser.storage.onChanged.addListener(onStorageChanged);
+    // After the initial load, so its stale state can't overwrite the first BRIEF_PROGRESS.
+    void loadBriefState().finally(() => onReady?.());
     return () => {
       browser.runtime.onMessage.removeListener(onMessage);
       browser.storage.onChanged.removeListener(onStorageChanged);

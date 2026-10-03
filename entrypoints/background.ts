@@ -185,9 +185,15 @@ async function toggleOverlayOnTab(tabId: number): Promise<void> {
   await browser.tabs.sendMessage(tabId, { type: 'TOGGLE_UI' });
 }
 
+/** Resolves once the overlay is listening for BRIEF_* messages. */
 async function openOverlayOnTab(tabId: number): Promise<void> {
   await ensureContentScript(tabId);
-  await browser.tabs.sendMessage(tabId, { type: 'OPEN_UI' });
+  const response = (await browser.tabs.sendMessage(tabId, {
+    type: 'OPEN_UI',
+  })) as { ok: boolean; error?: string } | undefined;
+  if (!response?.ok) {
+    throw new Error(response?.error ?? 'Overlay did not open');
+  }
 }
 
 /**
@@ -333,8 +339,6 @@ export default defineBackground(() => {
           await clearTabIfUrlChanged(tabId, pageUrl);
         }
         await openOverlayOnTab(tabId);
-        // Let OverlayApp mount and attach BRIEF_* listeners
-        await new Promise((resolve) => setTimeout(resolve, 80));
         await startBriefForTab(tabId, { force: false, format });
       } catch (error) {
         console.error('Failed to vox page from context menu', error);
