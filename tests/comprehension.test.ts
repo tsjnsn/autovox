@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { creditsForSession, type SessionKind } from "../convex/lib/economics";
 import type { LlmAuth } from "../utils/auth";
 import { planLesson } from "../utils/chalk/lesson";
 import type { SessionFormat } from "../utils/chalk/types";
@@ -18,6 +19,7 @@ import {
   pageSignalsFromJsonLd,
   parseArticleType,
   readArticleTypeField,
+  rebriefCreditsLabel,
   resolveArticleType,
   withArticleTypeField,
   type ArticleType,
@@ -30,7 +32,11 @@ import {
   buildNewsAnchorInstructions,
   buildTeacherInstructions,
 } from "../utils/tts";
-import { DEFAULT_SETTINGS, type ExtractedArticle } from "../utils/types";
+import {
+  DEFAULT_SETTINGS,
+  type ExtractedArticle,
+  type ReportLength,
+} from "../utils/types";
 import { understandArticle } from "../utils/understand";
 
 const AUTH: LlmAuth = {
@@ -504,6 +510,21 @@ void test("the overlay label shows what Infer settled on", () => {
   assert.equal(articleTypeLabel("infer", { type: "research", source: "inferred" }), "Infer · Research");
   assert.equal(articleTypeLabel("infer", { type: "news", source: "fallback" }), "Infer · News");
   assert.equal(articleTypeLabel("howto", { type: "news", source: "inferred" }), "How-to");
+});
+
+void test("the re-brief cost label follows the server's credit rule", () => {
+  for (const kind of ["brief", "chalkboard", "tts_replay"] as SessionKind[]) {
+    for (const length of ["short", "standard", "deep"] as ReportLength[]) {
+      const credits = creditsForSession(kind, length);
+      assert.equal(
+        rebriefCreditsLabel(kind, length),
+        `${credits} ${credits === 1 ? "credit" : "credits"}`,
+        `${kind} ${length}`,
+      );
+    }
+  }
+  assert.equal(rebriefCreditsLabel("brief", "standard"), "1 credit");
+  assert.equal(rebriefCreditsLabel("chalkboard", "deep"), "2 credits");
 });
 
 void test("a re-brief is offered only when the type could change", () => {

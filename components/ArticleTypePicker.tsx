@@ -4,6 +4,7 @@ import {
   ARTICLE_TYPE_SPECS,
   articleTypeLabel,
   choiceChangesType,
+  rebriefCreditsLabel,
   type ArticleTypeChoice,
   type ResolvedArticleType,
 } from '../utils/comprehension';
@@ -20,10 +21,6 @@ interface ArticleTypePickerProps {
   /** Credits are charged by length; null when the listener uses their own provider. */
   managedLength: ReportLength | null;
   disabled: boolean;
-}
-
-function creditsLabel(length: ReportLength): string {
-  return length === 'deep' ? '2 credits' : '1 credit';
 }
 
 function describe(
@@ -79,9 +76,12 @@ export function ArticleTypePicker({
     if (!choiceChangesType(next, current)) setOpen(false);
   };
 
+  const cost = managedLength
+    ? rebriefCreditsLabel(chalkboard ? 'chalkboard' : 'brief', managedLength)
+    : null;
   const rebriefText = `${chalkboard ? 'Redraw' : 'Re-brief'} ${
     choice === 'infer' ? 'with Infer' : `as ${ARTICLE_TYPE_SPECS[choice].short}`
-  }${managedLength ? ` · ${creditsLabel(managedLength)}` : ''}`;
+  }${cost ? ` · ${cost}` : ''}`;
 
   return (
     <>
@@ -166,8 +166,8 @@ export function ArticleTypePicker({
               className="autovox-link type-picker__rebrief"
               disabled={disabled}
               title={
-                managedLength
-                  ? `Briefs this page again. Uses ${creditsLabel(managedLength)}, like any brief.`
+                cost
+                  ? `Briefs this page again. Uses ${cost}, like any brief.`
                   : 'Briefs this page again with your provider.'
               }
               onClick={() => {

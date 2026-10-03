@@ -1,5 +1,6 @@
+import { creditsForSession, type SessionKind } from '../convex/lib/economics';
 import type { SessionFormat } from './chalk/types';
-import type { ExtractedArticle } from './types';
+import type { ExtractedArticle, ReportLength } from './types';
 
 /**
  * Article types steer comprehension: what to pull out of the page, the arc and
@@ -514,6 +515,15 @@ export function articleTypeLabel(
   return current && current.source !== 'chosen'
     ? `Infer · ${ARTICLE_TYPE_SPECS[current.type].short}`
     : 'Infer';
+}
+
+/** What a managed re-brief costs, by the server's own credit rule. */
+export function rebriefCreditsLabel(
+  kind: SessionKind,
+  reportLength: ReportLength,
+): string {
+  const credits = creditsForSession(kind, reportLength);
+  return `${credits} ${credits === 1 ? 'credit' : 'credits'}`;
 }
 
 /** Whether briefing again with `choice` could come out as a different type. */
