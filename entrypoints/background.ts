@@ -20,7 +20,13 @@ import {
 } from '../utils/managed';
 import type { LlmAuth } from '../utils/auth';
 import type { SessionFormat } from '../utils/chalk/types';
-import { briefErrorKind, errorMessage } from '../utils/errors';
+import { managedError, managedErrorData } from '../convex/lib/errors';
+import {
+  briefErrorKind,
+  errorMessage,
+  errorResponse,
+  type ErrorResponse,
+} from '../utils/errors';
 import type { BriefProgress, ExtensionMessage } from '../utils/types';
 
 const CONTEXT_MENU_VOX_PAGE = 'autovox-vox-page';
@@ -135,8 +141,7 @@ async function acquireManagedAuthForTab(
         } catch (error) {
           lastError = error;
           if (
-            !(error instanceof Error) ||
-            !error.message.includes('already in progress') ||
+            managedErrorData(error)?.code !== 'session_in_progress' ||
             attempt === 2
           ) {
             throw error;
@@ -405,11 +410,7 @@ export default defineBackground(() => {
           sendResponse({ ok: true });
         } catch (error) {
           console.error('Failed to open Autovox options', error);
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error ? error.message : 'Could not open options',
-          });
+          sendResponse(errorResponse(error, 'Could not open options'));
         }
       })();
       return true;
@@ -421,13 +422,7 @@ export default defineBackground(() => {
           const status = await getManagedAccountStatus();
           sendResponse({ ok: true, status });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not load managed credits',
-          });
+          sendResponse(errorResponse(error, 'Could not load managed credits'));
         }
       })();
       return true;
@@ -439,13 +434,9 @@ export default defineBackground(() => {
           const status = await ensureManagedAccount();
           sendResponse({ ok: true, status });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not initialize managed listening',
-          });
+          sendResponse(
+            errorResponse(error, 'Could not initialize managed listening'),
+          );
         }
       })();
       return true;
@@ -458,13 +449,7 @@ export default defineBackground(() => {
           await browser.tabs.create({ url });
           sendResponse({ ok: true });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not start checkout',
-          });
+          sendResponse(errorResponse(error, 'Could not start checkout'));
         }
       })();
       return true;
@@ -474,7 +459,10 @@ export default defineBackground(() => {
       void (async () => {
         try {
           if (!isManagedConfigured()) {
-            throw new Error('Managed listening is not configured');
+            throw managedError(
+              'not_configured',
+              'Managed listening is not configured in this build',
+            );
           }
           if (sender.tab?.id == null) {
             throw new Error('Managed narration requires a browser tab');
@@ -485,13 +473,9 @@ export default defineBackground(() => {
           );
           sendResponse({ ok: true, ...managed });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not authorize managed narration',
-          });
+          sendResponse(
+            errorResponse(error, 'Could not authorize managed narration'),
+          );
         }
       })();
       return true;
@@ -514,13 +498,9 @@ export default defineBackground(() => {
           }
           sendResponse({ ok: true });
         } catch (error) {
-          sendResponse({
-            ok: false,
-            error:
-              error instanceof Error
-                ? error.message
-                : 'Could not report managed listening',
-          });
+          sendResponse(
+            errorResponse(error, 'Could not report managed listening'),
+          );
         }
       })();
       return true;
@@ -543,7 +523,11 @@ export default defineBackground(() => {
       void (async () => {
         const tabId = await resolveTabId(msg.tabId, sender.tab?.id);
         if (tabId == null) {
-          sendResponse({ ok: false, error: 'No active tab found.' });
+          sendResponse({
+            ok: false,
+            error: 'No active tab found.',
+            kind: 'fault',
+          } satisfies ErrorResponse);
           return;
         }
 
@@ -553,7 +537,8 @@ export default defineBackground(() => {
           sendResponse({
             ok: false,
             error: 'A briefing is already in progress on this page.',
-          });
+            kind: 'transient',
+          } satisfies ErrorResponse);
           return;
         }
 

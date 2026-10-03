@@ -5,7 +5,11 @@ import { ScriptPreview } from './ScriptPreview';
 import { StreamingPlayer } from './StreamingPlayer';
 import { samePageUrl } from '../utils/briefState';
 import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../utils/auth';
-import { errorMeterLabel, type BriefErrorKind } from '../utils/errors';
+import {
+  errorMeterLabel,
+  type BriefErrorKind,
+  type ErrorResponse,
+} from '../utils/errors';
 import {
   addMoneyLine,
   finishMoneySession,
@@ -38,6 +42,10 @@ interface BriefStateResponse {
   result: BriefResult | null;
   running: boolean;
 }
+
+type ManagedAuthResponse =
+  | { ok: true; sessionId: string; auth: LlmAuth }
+  | ErrorResponse;
 
 interface OverlayAppProps {
   onClose: () => void;
@@ -143,19 +151,15 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
           result.reportLength ?? settings.reportLength,
         voice: settings.voice,
         outputLanguage: settings.outputLanguage,
-      })) as {
-        ok: boolean;
-        sessionId?: string;
-        auth?: LlmAuth;
-        error?: string;
-      };
+      })) as ManagedAuthResponse | undefined;
       if (cancelled) return;
-      if (!response.ok || !response.sessionId || !response.auth) {
+      if (!response?.ok) {
         setManagedPlayerAuth(null);
-        setFault({
-          message: response.error ?? 'Managed listening is unavailable',
-          kind: 'fault',
-        });
+        setFault(
+          response
+            ? { message: response.error, kind: response.kind }
+            : { message: 'Managed listening is unavailable', kind: 'fault' },
+        );
         setPhase('error');
         setNarrating(false);
         return;
@@ -503,15 +507,16 @@ export function OverlayApp({ onClose }: OverlayAppProps) {
     const response = (await browser.runtime.sendMessage({
       type: 'START_BRIEF',
       format,
-    })) as { ok: boolean; error?: string };
+    })) as { ok: true } | ErrorResponse | undefined;
 
     if (!response?.ok) {
       setExtracting(false);
       setPhase('error');
-      setFault({
-        message: response?.error ?? 'Could not start briefing',
-        kind: 'fault',
-      });
+      setFault(
+        response
+          ? { message: response.error, kind: response.kind }
+          : { message: 'Could not start briefing', kind: 'fault' },
+      );
     }
   };
 

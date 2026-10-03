@@ -14,6 +14,7 @@ import {
 } from '@clerk/chrome-extension';
 import { hasLlmAuth, resolveLlmAuth, type LlmAuth } from '../../utils/auth';
 import { connectOpenRouter } from '../../utils/connect';
+import type { ErrorResponse } from '../../utils/errors';
 import {
   isManagedConfigured,
   type ManagedAccountStatus,
@@ -60,6 +61,26 @@ function maskKey(key: string): string {
   return `${trimmed.slice(0, 6)}…${trimmed.slice(-4)}`;
 }
 
+type ManagedAccountResponse =
+  | { ok: true; status: ManagedAccountStatus }
+  | ErrorResponse;
+
+type ManagedFailure = Pick<ErrorResponse, 'error' | 'code'>;
+
+async function requestManagedAccount(
+  ensure: boolean,
+): Promise<ManagedAccountResponse> {
+  return (await browser.runtime.sendMessage({
+    type: ensure ? 'ENSURE_MANAGED_ACCOUNT' : 'GET_MANAGED_ACCOUNT',
+  })) as ManagedAccountResponse;
+}
+
+async function requestManagedCheckout(): Promise<{ ok: true } | ErrorResponse> {
+  return (await browser.runtime.sendMessage({
+    type: 'START_MANAGED_CHECKOUT',
+  })) as { ok: true } | ErrorResponse;
+}
+
 function ManagedPanel({
   active,
   onUseManaged,
@@ -67,30 +88,28 @@ function ManagedPanel({
   active: boolean;
   onUseManaged: () => Promise<void>;
 }) {
-  const { isSignedIn } = useAuth();
+  const { isSignedIn, signOut } = useAuth();
   const [account, setAccount] = useState<ManagedAccountStatus | null>(
     null,
   );
-  const [error, setError] = useState('');
+  const [failure, setFailure] = useState<ManagedFailure | null>(null);
   const [busy, setBusy] = useState(false);
 
   const refresh = useCallback(async (ensure = false) => {
     if (!isSignedIn) {
       setAccount(null);
+      setFailure(null);
       return;
     }
-    const response = (await browser.runtime.sendMessage({
-      type: ensure ? 'ENSURE_MANAGED_ACCOUNT' : 'GET_MANAGED_ACCOUNT',
-    })) as {
-      ok: boolean;
-      status?: ManagedAccountStatus;
-      error?: string;
-    };
-    if (response.ok && response.status) {
+    let response = await requestManagedAccount(ensure);
+    if (!response.ok && response.code === 'account_not_initialized' && !ensure) {
+      response = await requestManagedAccount(true);
+    }
+    if (response.ok) {
       setAccount(response.status);
-      setError('');
+      setFailure(null);
     } else {
-      setError(response.error ?? 'Could not load managed credits');
+      setFailure(response);
     }
   }, [isSignedIn]);
 
@@ -106,20 +125,22 @@ function ManagedPanel({
 
   const startCheckout = async () => {
     setBusy(true);
-    setError('');
+    setFailure(null);
     try {
-      const response = (await browser.runtime.sendMessage({
-        type: 'START_MANAGED_CHECKOUT',
-      })) as { ok: boolean; error?: string };
-      if (!response.ok) {
-        throw new Error(response.error ?? 'Could not start checkout');
+      let response = await requestManagedCheckout();
+      if (!response.ok && response.code === 'account_not_initialized') {
+        const ensured = await requestManagedAccount(true);
+        if (ensured.ok) setAccount(ensured.status);
+        response = ensured.ok ? await requestManagedCheckout() : ensured;
       }
+      if (!response.ok) setFailure(response);
     } catch (checkoutError) {
-      setError(
-        checkoutError instanceof Error
-          ? checkoutError.message
-          : 'Could not start checkout',
-      );
+      setFailure({
+        error:
+          checkoutError instanceof Error
+            ? checkoutError.message
+            : 'Could not start checkout',
+      });
     } finally {
       setBusy(false);
     }
@@ -179,7 +200,16 @@ function ManagedPanel({
           </button>
         </div>
       </Show>
-      {error ? <p className="hint warn">{error}</p> : null}
+      {failure ? <p className="hint warn">{failure.error}</p> : null}
+      {failure?.code === 'not_authenticated' ? (
+        <button
+          type="button"
+          className="btn-link"
+          onClick={() => void signOut()}
+        >
+          Sign in again
+        </button>
+      ) : null}
     </section>
   );
 }
