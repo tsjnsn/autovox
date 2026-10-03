@@ -80,6 +80,7 @@ function abortTabBrief(tabId: number): void {
 }
 
 async function onTabUrlChanged(tabId: number, url: string): Promise<void> {
+  void clearActionFault(tabId);
   abortTabBrief(tabId);
   await abortManagedSessionForTab(tabId);
   await clearTabIfUrlChanged(tabId, url);
@@ -180,19 +181,49 @@ async function acquireManagedAuthForTab(
   }
 }
 
-async function toggleOverlayOnTab(tabId: number): Promise<void> {
+async function sendOverlayMessage(
+  tabId: number,
+  type: 'TOGGLE_UI' | 'OPEN_UI',
+): Promise<void> {
   await ensureContentScript(tabId);
-  await browser.tabs.sendMessage(tabId, { type: 'TOGGLE_UI' });
+  const response = (await browser.tabs.sendMessage(tabId, { type })) as
+    | { ok: true }
+    | ErrorResponse
+    | undefined;
+  if (!response?.ok) {
+    throw new Error(response?.error ?? 'Overlay did not open');
+  }
+}
+
+async function toggleOverlayOnTab(tabId: number): Promise<void> {
+  await sendOverlayMessage(tabId, 'TOGGLE_UI');
 }
 
 /** Resolves once the overlay is listening for BRIEF_* messages. */
 async function openOverlayOnTab(tabId: number): Promise<void> {
-  await ensureContentScript(tabId);
-  const response = (await browser.tabs.sendMessage(tabId, {
-    type: 'OPEN_UI',
-  })) as { ok: boolean; error?: string } | undefined;
-  if (!response?.ok) {
-    throw new Error(response?.error ?? 'Overlay did not open');
+  await sendOverlayMessage(tabId, 'OPEN_UI');
+}
+
+/** With no overlay to carry the Fault label, the toolbar icon carries it for this tab. */
+async function showActionFault(tabId: number): Promise<void> {
+  try {
+    await browser.action.setBadgeBackgroundColor({ tabId, color: '#E23B2F' });
+    await browser.action.setBadgeText({ tabId, text: '!' });
+    await browser.action.setTitle({ tabId, title: 'Autovox: Fault' });
+  } catch {
+    // The tab closed.
+  }
+}
+
+async function clearActionFault(tabId: number): Promise<void> {
+  try {
+    await browser.action.setBadgeText({ tabId, text: '' });
+    await browser.action.setTitle({
+      tabId,
+      title: browser.runtime.getManifest().action?.default_title ?? 'Autovox',
+    });
+  } catch {
+    // The tab closed.
   }
 }
 
@@ -334,6 +365,7 @@ export default defineBackground(() => {
     const pageUrl = tab?.url;
 
     void (async () => {
+      await clearActionFault(tabId);
       try {
         if (pageUrl) {
           await clearTabIfUrlChanged(tabId, pageUrl);
@@ -342,6 +374,7 @@ export default defineBackground(() => {
         await startBriefForTab(tabId, { force: false, format });
       } catch (error) {
         console.error('Failed to vox page from context menu', error);
+        await showActionFault(tabId);
       }
     })();
   });
@@ -350,6 +383,7 @@ export default defineBackground(() => {
     void (async () => {
       const tabId = tab.id;
       if (tabId == null) return;
+      await clearActionFault(tabId);
       try {
         if (tab.url) {
           await clearTabIfUrlChanged(tabId, tab.url);
@@ -357,6 +391,7 @@ export default defineBackground(() => {
         await toggleOverlayOnTab(tabId);
       } catch (error) {
         console.error('Failed to toggle Autovox overlay', error);
+        await showActionFault(tabId);
       }
     })();
   });
