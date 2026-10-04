@@ -162,6 +162,17 @@ export type ExtensionMessage =
   | { type: 'OPEN_UI' }
   | { type: 'CLOSE_UI' }
   | { type: 'OPEN_OPTIONS' }
+  /** Saved briefs on this browser, newest first, without scripts or art. */
+  | { type: 'LIST_ARTIFACTS' }
+  /** One saved brief, so the player can show it. */
+  | { type: 'GET_ARTIFACT'; id: string }
+  /** Drops one saved brief from this browser. */
+  | { type: 'REMOVE_ARTIFACT'; id: string }
+  /**
+   * Opens ChatGPT or Claude so the user can ask about the brief on screen.
+   * The brief stays on the clipboard in the page; this message carries no text.
+   */
+  | { type: 'OPEN_FOLLOW_UP'; target: 'chatgpt' | 'claude' }
   | { type: 'GET_MANAGED_ACCOUNT' }
   | { type: 'ENSURE_MANAGED_ACCOUNT' }
   | { type: 'START_MANAGED_CHECKOUT' }

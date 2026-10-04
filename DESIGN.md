@@ -101,9 +101,22 @@ AUTOVOX                           Close
 source…                (after script ready)
 Show script
 
-Options · Chalkboard          Infer ▾          (idle / brief)
-Options · Chalkboard · Clear                    (after script ready; the
-                         Infer · News ▾          type readout drops to its own line)
+Options                                (idle)
+Options · Ask · Clear                         (after script ready)
+
+The first click on play opens Brief, Chalkboard, and the article type.
+Brief or Chalkboard is what starts. A second click on play starts a brief.
+Play and pause after that stay the transport.
+A saved listen does the same: play opens that menu first, and the menu adds
+Re-generate. A second click on play plays the saved audio. Re-generate makes
+a new one.
+
+Saved briefs stay in the player. When more than one is saved, ‹ › steps
+newer and older. The brief for this page keeps its transport. An older one
+shows its script and board in that same face, and Remove drops that copy.
+Play still briefs this page.
+Ask opens under the meta row: a question line, then ChatGPT · Claude.
+Those links copy the brief and open that app. Neither spends a credit.
 ```
 
 No logo subtitle. No voice select. No separate Brief button. No Stop. No volume row: the speaker mutes, and its slider only opens on hover or focus, as on YouTube.
@@ -149,26 +162,23 @@ Options · Export video · Clear             Infer · Explainer ▾
 - The board is a display on the same instrument, not a second mode: one transport row still drives it, and the chassis only widens.
 - The board is a pure function of the playhead. Scrub, pause, and replay put it exactly where the voice is; it never runs ahead through a buffering gap.
 - The board is never blank or stale: the heading is written first, beat notes stand in until a scene's art arrives, then the art catches up in about a second.
-- **Chalkboard** is a quiet meta link (like Options), never a second primary button. Play still means go.
+- **Chalkboard** is chosen in the play menu, then it starts. It is not a second button beside Options.
 - **Export video** is meta too: the link itself shows progress ("Exporting 42%"), clicking it again cancels, and a failure reads "Export failed" in danger ink with the reason on hover. No modal, no second progress bar.
 
 ### Article type
 
 ```
-Options · Chalkboard · Clear
-                       Opinion ▴
-────────────────────────────────
+[▶] ===meter===
+Brief · Chalkboard
 ARTICLE TYPE
 [Infer] [News] [Feature] [Explainer]
-[■Opinion■] [How-to] [Research] [Interview]
-Re-brief as Opinion · 1 credit
+[Opinion] [How-to] [Research] [Interview]
 ```
 
-- The article type (news, feature, explainer, opinion, how-to, research, interview) shapes how the page is told and boarded. The default lives in Options; the overlay can override it for the page in view, like Chalkboard.
-- It is a readout at the right end of the meta row, never a select in the faceplate. With no separator before it, it can drop to its own line in the narrow card without leaving a stray dot.
-- Once a brief exists, Infer shows what it settled on (`Infer · News`, with "Infer ·" muted). Hover says how it was settled.
-- Clicking opens an in-flow chooser under the meta row: owned chips over hidden native radios. The pick is filled with ink, and the brief on screen gets a dashed border.
-- Changing the pick never spends anything by itself. If a brief is on screen and the pick could change it, the chooser offers one explicit link, `Re-brief as X` or `Redraw as X`, with the credit cost in managed mode. Otherwise the pick applies to the next brief.
+- The article type (news, feature, explainer, opinion, how-to, research, interview) shapes how the page is told and boarded. The default lives in Options; the overlay overrides it for this play.
+- The choices sit under play, not in the meta row. Owned chips over hidden native radios. The type already on a brief gets a dashed border.
+- Choosing a type does not spend anything. Brief or Chalkboard starts the session. If a brief is already on screen, those actions name the credit cost in managed mode.
+- A saved listen adds Re-generate. That spends the way a new brief does. Choosing the format already saved plays that copy, until the article type changes.
 
 ## Motion
 

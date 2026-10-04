@@ -7,7 +7,9 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ArticleTypePicker } from './ArticleTypePicker';
+import { FollowUpAsk } from './FollowUpAsk';
+import { PlayMenu } from './PlayMenu';
+import { ReelSkip, SavedBoard, SavedNotes } from './SavedTape';
 import { BriefMeter } from './BriefMeter';
 import { Chalkboard } from './Chalkboard';
 import { ScriptPreview } from './ScriptPreview';
@@ -20,6 +22,7 @@ import {
 } from '../utils/errors';
 import { lessonTtsChunks } from '../utils/tts';
 import {
+  choiceChangesType,
   effectiveArticleTypeChoice,
   type ArticleTypeChoice,
 } from '../utils/comprehension';
@@ -29,6 +32,13 @@ import type {
   ChalkTimeline,
   SessionFormat,
 } from '../utils/chalk/types';
+import {
+  readArtifactSummaries,
+  readSavedTape,
+  type ArtifactSummary,
+  type SavedTape,
+} from '../utils/artifactView';
+import { readOverlaySettings } from '../utils/overlayView';
 import type {
   BriefDraft,
   BriefPhase,
@@ -51,10 +61,16 @@ type ManagedNarrationResponse =
 
 type ManagedNarration = { sessionId: string | null };
 
-async function getOverlaySettings(): Promise<OverlaySettings> {
-  return (await browser.runtime.sendMessage({
-    type: 'GET_OVERLAY_SETTINGS',
-  })) as OverlaySettings;
+async function getOverlaySettings(): Promise<OverlaySettings | null> {
+  try {
+    return readOverlaySettings(
+      await browser.runtime.sendMessage({
+        type: 'GET_OVERLAY_SETTINGS',
+      }),
+    );
+  } catch {
+    return null;
+  }
 }
 
 interface OverlayAppProps {
@@ -129,6 +145,13 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const [narrationPcm, setNarrationPcm] = useState<Uint8Array | null>(null);
   const [exportPercent, setExportPercent] = useState<number | null>(null);
   const [exportError, setExportError] = useState('');
+  const [saved, setSaved] = useState<ArtifactSummary[]>([]);
+  const [tapeId, setTapeId] = useState<string | null>(null);
+  const [tape, setTape] = useState<SavedTape | null>(null);
+  const [savedTick, setSavedTick] = useState(0);
+  const [playMenuOpen, setPlayMenuOpen] = useState(false);
+  /** False while a saved listen is waiting. Play opens the menu before audio starts. */
+  const [armPlayback, setArmPlayback] = useState(false);
   const exportAbortRef = useRef<AbortController | null>(null);
   const sceneBacklogRef = useRef<SceneBacklog | null>(null);
   const getBoardTime = useCallback(() => clockRef.current?.() ?? 0, []);
@@ -271,8 +294,65 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     [],
   );
 
+  const liveId = result?.moneySessionId ?? null;
+  const showingLive =
+    Boolean(result) && (tapeId === null || tapeId === liveId);
+  const viewedId = showingLive ? liveId : (tapeId ?? saved[0]?.id ?? null);
+  const onFace = !showingLive && tape && tape.id === viewedId ? tape : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    void browser.runtime.sendMessage({ type: 'LIST_ARTIFACTS' }).then(
+      (response: unknown) => {
+        if (!cancelled) setSaved(readArtifactSummaries(response));
+      },
+      () => {
+        if (!cancelled) setSaved([]);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [savedTick]);
+
+  useEffect(() => {
+    if (!viewedId || showingLive) return;
+    let cancelled = false;
+    void browser.runtime.sendMessage({ type: 'GET_ARTIFACT', id: viewedId }).then(
+      (response: unknown) => {
+        if (cancelled) return;
+        const next = readSavedTape(response);
+        setTape(next && next.id === viewedId ? next : null);
+      },
+      () => {
+        if (!cancelled) setTape(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [viewedId, showingLive, savedTick]);
+
+  const selectTape = (id: string) => {
+    setTapeId(id === liveId ? null : id);
+  };
+
+  const removeTape = () => {
+    if (!onFace) return;
+    void browser.runtime.sendMessage({
+      type: 'REMOVE_ARTIFACT',
+      id: onFace.id,
+    }).then(() => {
+      setTapeId(null);
+      setTape(null);
+      setSavedTick((tick) => tick + 1);
+    });
+  };
+
   const hasAuth = settings ? settings.hasAuth : null;
   const busy = extracting || narrating;
+  const playBlocked = busy || hasAuth === false;
+  if (playBlocked && playMenuOpen) setPlayMenuOpen(false);
   const hasPlayer = Boolean(
     result &&
       settings &&
@@ -352,7 +432,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
 
     const loadBriefState = async () => {
       const loaded = await getOverlaySettings();
-      applySettings(loaded);
+      if (loaded) applySettings(loaded);
 
       const state = (await browser.runtime.sendMessage({
         type: 'GET_BRIEF_STATE',
@@ -368,7 +448,10 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         setResult(withScenes(matched, sceneBacklogRef.current));
         if (state.progress.phase === 'generating_audio') {
           setNarrating(true);
+          setArmPlayback(true);
           setStreamKey((k) => k + 1);
+        } else {
+          setArmPlayback(false);
         }
       } else if (state.running) {
         setResult(null);
@@ -428,8 +511,11 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         setPhase('generating_audio');
         setExtracting(false);
         setNarrating(true);
+        setArmPlayback(true);
         setFault(null);
         setStreamKey((k) => k + 1);
+        setTapeId(null);
+        setSavedTick((tick) => tick + 1);
       }
       if (message.type === 'CHALK_SCENE_READY') {
         if (!samePageUrl(message.pageUrl, location.href)) return;
@@ -440,6 +526,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         }
         backlog.scenes.set(message.scene, message.drawing);
         setResult((prev) => (prev ? withScenes(prev, backlog) : prev));
+        setSavedTick((tick) => tick + 1);
       }
       if (message.type === 'BRIEF_ERROR') {
         setPhase('error');
@@ -449,11 +536,13 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         setNarrating(false);
       }
       if (message.type === 'OVERLAY_SETTINGS_CHANGED') {
-        applySettings(message.settings);
+        const next = readOverlaySettings(message.settings);
+        if (!next) return;
+        applySettings(next);
         if (message.credentialsChanged) {
           setAuthRevision((revision) => revision + 1);
         }
-        if (message.settings.hasAuth && faultRef.current?.kind === 'setup') {
+        if (next.hasAuth && faultRef.current?.kind === 'setup') {
           setFault(null);
           setPhase((prev) => (prev === 'error' ? 'idle' : prev));
         }
@@ -474,8 +563,8 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
 
   const startBrief = async (format: SessionFormat = 'brief') => {
     const latest = await getOverlaySettings();
-    applySettings(latest);
-    if (!latest.hasAuth) {
+    if (latest) applySettings(latest);
+    if (!latest?.hasAuth) {
       setFault({
         message: 'Connect with OpenRouter or add an OpenAI API key in Options first.',
         kind: 'setup',
@@ -485,6 +574,8 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     }
 
     setFault(null);
+    setTapeId(null);
+    setPlayMenuOpen(false);
     moneySessionRef.current = null;
     managedRuntimeSessionRef.current = null;
     setManagedNarration(null);
@@ -518,6 +609,36 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     }
   };
 
+  const beginFromMenu = (format: SessionFormat) => {
+    setPlayMenuOpen(false);
+    setArmPlayback(true);
+    void startBrief(format);
+  };
+
+  const playSaved = (format: SessionFormat) => {
+    if (
+      showingLive &&
+      result &&
+      result.format === format &&
+      !choiceChangesType(articleTypeChoice, result.articleType ?? null) &&
+      !armPlayback
+    ) {
+      setPlayMenuOpen(false);
+      setArmPlayback(true);
+      return;
+    }
+    beginFromMenu(format);
+  };
+
+  const playCached = () => {
+    if (!playMenuOpen) {
+      setPlayMenuOpen(true);
+      return;
+    }
+    setPlayMenuOpen(false);
+    setArmPlayback(true);
+  };
+
   const clearBrief = async () => {
     await browser.runtime.sendMessage({ type: 'CLEAR_BRIEF' });
     moneySessionRef.current = null;
@@ -532,6 +653,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     setSourceWords(null);
     setDraft(null);
     setNarrating(false);
+    setArmPlayback(false);
   };
 
   const handlePlaying = useCallback(() => {
@@ -543,6 +665,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const handleDone = useCallback((playbackSeconds: number) => {
     setPhase('ready');
     setNarrating(false);
+    setArmPlayback(false);
     void finishTtsSession('completed');
     void reportManagedPlayback({ type: 'completed', playbackSeconds });
   }, [finishTtsSession, reportManagedPlayback]);
@@ -572,7 +695,9 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     hasAuth === false ? 'Needs setup' : meterLabel(phase, fault, extracting);
 
   return (
-    <div className={`autovox-card${lesson ? ' autovox-card--board' : ''}`}>
+    <div
+      className={`autovox-card${(showingLive ? lesson : onFace?.lesson) ? ' autovox-card--board' : ''}`}
+    >
       <div className="autovox-card__face">
         <header className="autovox-card__header">
           <h1 className="autovox-card__title">Autovox</h1>
@@ -586,18 +711,21 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
           </button>
         </header>
 
-        {lesson ? (
+        {showingLive && lesson ? (
           <Chalkboard
             lesson={lesson}
             drawings={result!.drawings ?? lesson.scenes.map(() => null)}
             timeline={timeline}
             getTime={getBoardTime}
           />
+        ) : onFace ? (
+          <SavedBoard tape={onFace} />
         ) : null}
 
         {hasPlayer ? (
           <>
             <StreamingPlayer
+              held={!showingLive}
               key={`${streamKey}:${settings!.providerMode}`}
               script={result!.script}
               briefId={result!.moneySessionId ?? null}
@@ -616,14 +744,22 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
               onDone={handleDone}
               onError={handleError}
               onAbort={handleAbort}
+              suspended={!armPlayback}
+              menuOpen={playMenuOpen}
+              onPlayRequest={armPlayback ? undefined : playCached}
             />
-            <p className="autovox-source">
-              {result!.source.siteName ? `${result!.source.siteName} · ` : ''}
-              {result!.source.title}
-            </p>
-            <ScriptPreview script={result!.script} />
+            {showingLive ? (
+              <>
+                <p className="autovox-source">
+                  {result!.source.siteName ? `${result!.source.siteName} · ` : ''}
+                  {result!.source.title}
+                </p>
+                <ScriptPreview script={result!.script} />
+              </>
+            ) : null}
           </>
-        ) : (
+        ) : null}
+        {hasPlayer && showingLive ? null : (
           <BriefMeter
             working={extracting}
             label={label}
@@ -631,15 +767,55 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
             labelIsError={Boolean(fault) || hasAuth === false}
             playDisabled={busy || hasAuth === false}
             playLabel={
-              result?.format === 'chalkboard'
-                ? 'Chalkboard this page'
-                : 'Brief this page'
+              playMenuOpen
+                ? 'Play the brief'
+                : 'Choose brief or chalkboard'
             }
-            onPlay={() => void startBrief(result?.format ?? 'brief')}
+            menuOpen={playMenuOpen}
+            onPlay={() => {
+              if (!playMenuOpen) {
+                setPlayMenuOpen(true);
+                return;
+              }
+              beginFromMenu('brief');
+            }}
             sourceWords={sourceWords}
             draft={draft}
           />
         )}
+
+        {playMenuOpen ? (
+          <PlayMenu
+            choice={articleTypeChoice}
+            current={result?.articleType ?? null}
+            onChoose={setArticleTypeOverride}
+            replacing={Boolean(result)}
+            cachedFormat={
+              hasPlayer && showingLive && result ? result.format : null
+            }
+            managedLength={
+              settings?.providerMode === 'managed' ? settings.reportLength : null
+            }
+            onStart={playSaved}
+            onRegenerate={
+              hasPlayer && result
+                ? () => beginFromMenu(result.format ?? 'brief')
+                : onFace
+                  ? () => beginFromMenu(onFace.format)
+                  : undefined
+            }
+            onClose={() => setPlayMenuOpen(false)}
+          />
+        ) : null}
+
+        {onFace ? <SavedNotes tape={onFace} /> : null}
+        <ReelSkip
+          summaries={saved}
+          selectedId={viewedId}
+          headline={showingLive ? (result?.script.headline ?? '') : (onFace?.headline ?? '')}
+          disabled={extracting}
+          onSelect={selectTape}
+        />
 
         <div className="autovox-actions__meta">
           <button
@@ -650,22 +826,7 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
           >
             Options
           </button>
-          {!lesson ? (
-            <>
-              <span className="autovox-actions__sep" aria-hidden="true">
-                ·
-              </span>
-              <button
-                type="button"
-                className="autovox-link"
-                disabled={busy || hasAuth === false}
-                onClick={() => void startBrief('chalkboard')}
-              >
-                Chalkboard
-              </button>
-            </>
-          ) : null}
-          {lesson && narrationPcm ? (
+          {showingLive && lesson && narrationPcm ? (
             <>
               <span className="autovox-actions__sep" aria-hidden="true">
                 ·
@@ -692,8 +853,35 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
               </button>
             </>
           ) : null}
-          {result ? (
+          {onFace ? (
             <>
+              <span className="autovox-actions__sep" aria-hidden="true">
+                ·
+              </span>
+              <button
+                type="button"
+                className="autovox-link"
+                disabled={extracting}
+                onClick={removeTape}
+              >
+                Remove
+              </button>
+            </>
+          ) : null}
+          {result && showingLive ? (
+            <>
+              <span className="autovox-actions__sep" aria-hidden="true">
+                ·
+              </span>
+              <FollowUpAsk
+                script={result.script}
+                sourceLabel={
+                  result.source.siteName
+                    ? `${result.source.siteName} · ${result.source.title}`
+                    : result.source.title
+                }
+                disabled={extracting}
+              />
               <span className="autovox-actions__sep" aria-hidden="true">
                 ·
               </span>
@@ -707,17 +895,22 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
               </button>
             </>
           ) : null}
-          <ArticleTypePicker
-            choice={articleTypeChoice}
-            current={result?.articleType ?? null}
-            onChoose={setArticleTypeOverride}
-            onRebrief={() => void startBrief(result?.format ?? 'brief')}
-            chalkboard={Boolean(lesson)}
-            managedLength={
-              settings?.providerMode === 'managed' ? settings.reportLength : null
-            }
-            disabled={extracting}
-          />
+          {onFace ? (
+            <>
+              <span className="autovox-actions__sep" aria-hidden="true">
+                ·
+              </span>
+              <FollowUpAsk
+                script={onFace.script}
+                sourceLabel={
+                  onFace.siteName
+                    ? `${onFace.siteName} · ${onFace.sourceTitle}`
+                    : onFace.sourceTitle
+                }
+                disabled={extracting}
+              />
+            </>
+          ) : null}
         </div>
       </div>
     </div>

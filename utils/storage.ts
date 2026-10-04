@@ -22,11 +22,12 @@ export async function getSettings(): Promise<Settings> {
 export function coerceSettings(stored: unknown): Settings {
   const value = stored as Partial<Settings> | undefined;
   const merged = { ...DEFAULT_SETTINGS, ...value };
+  const env = import.meta.env;
   const configuredDefault: ProviderMode =
-    import.meta.env.WXT_PUBLIC_MANAGED_ENABLED === 'true' &&
-    Boolean(import.meta.env.WXT_PUBLIC_CONVEX_URL?.trim()) &&
-    Boolean(import.meta.env.WXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim()) &&
-    Boolean(import.meta.env.WXT_PUBLIC_CLERK_FRONTEND_API_URL?.trim()) &&
+    env?.WXT_PUBLIC_MANAGED_ENABLED === 'true' &&
+    Boolean(env?.WXT_PUBLIC_CONVEX_URL?.trim()) &&
+    Boolean(env?.WXT_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim()) &&
+    Boolean(env?.WXT_PUBLIC_CLERK_FRONTEND_API_URL?.trim()) &&
     !merged.openRouterApiKey?.trim() &&
     !merged.apiKey?.trim()
       ? 'managed'

@@ -27,6 +27,8 @@ import {
   errorResponse,
   type ErrorResponse,
 } from '../utils/errors';
+import { followUpOpenUrl, isFollowUpTarget } from '../utils/followUp';
+import { artifactHistory } from '../utils/history';
 import { finishMoneySession } from '../utils/money';
 import {
   attachNarrationUsage,
@@ -39,7 +41,11 @@ import {
 } from '../utils/narration';
 import { narrationCache } from '../utils/narrationCache';
 import { NARRATION_PORT, serveNarrationPort } from '../utils/narrationProtocol';
-import { credentialsKey, overlaySettings } from '../utils/overlaySettings';
+import {
+  credentialsKey,
+  overlaySettings,
+  overlaySettingsView,
+} from '../utils/overlaySettings';
 import { normalizePageUrl } from '../utils/pageUrl';
 import { coerceSettings, getSettings, SETTINGS_KEY } from '../utils/storage';
 import type {
@@ -564,6 +570,73 @@ export default defineBackground(() => {
       return true;
     }
 
+    if (msg.type === 'LIST_ARTIFACTS') {
+      void (async () => {
+        try {
+          const artifacts = await artifactHistory().list();
+          sendResponse({
+            ok: true,
+            artifacts: artifacts.map((artifact) => ({
+              id: artifact.id,
+              createdAt: artifact.createdAt,
+              format: artifact.format,
+              headline: artifact.headline,
+              sourceTitle: artifact.sourceTitle,
+              siteName: artifact.siteName,
+            })),
+          });
+        } catch (error) {
+          sendResponse(errorResponse(error, 'Could not read saved briefs'));
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'GET_ARTIFACT') {
+      void (async () => {
+        try {
+          if (typeof msg.id !== 'string' || msg.id.length === 0) {
+            throw new Error('Unknown brief');
+          }
+          const artifact = await artifactHistory().get(msg.id);
+          sendResponse(artifact ? { ok: true, artifact } : { ok: false });
+        } catch (error) {
+          sendResponse(errorResponse(error, 'Could not open that brief'));
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'REMOVE_ARTIFACT') {
+      void (async () => {
+        try {
+          if (typeof msg.id !== 'string' || msg.id.length === 0) {
+            throw new Error('Unknown brief');
+          }
+          await artifactHistory().remove(msg.id);
+          sendResponse({ ok: true });
+        } catch (error) {
+          sendResponse(errorResponse(error, 'Could not remove that brief'));
+        }
+      })();
+      return true;
+    }
+
+    if (msg.type === 'OPEN_FOLLOW_UP') {
+      void (async () => {
+        try {
+          if (!isFollowUpTarget(msg.target)) {
+            throw new Error('Unknown follow-up target');
+          }
+          await browser.tabs.create({ url: followUpOpenUrl(msg.target) });
+          sendResponse({ ok: true });
+        } catch (error) {
+          sendResponse(errorResponse(error, 'Could not open the chat'));
+        }
+      })();
+      return true;
+    }
+
     if (msg.type === 'GET_MANAGED_ACCOUNT') {
       void (async () => {
         try {
@@ -605,7 +678,12 @@ export default defineBackground(() => {
 
     if (msg.type === 'GET_OVERLAY_SETTINGS') {
       void (async () => {
-        sendResponse(overlaySettings(await getSettings()));
+        try {
+          sendResponse(overlaySettingsView(await getSettings()));
+        } catch (error) {
+          console.warn('[autovox] could not load overlay settings', error);
+          sendResponse(overlaySettingsView(undefined));
+        }
       })();
       return true;
     }

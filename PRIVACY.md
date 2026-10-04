@@ -20,6 +20,7 @@ A chalkboard lesson additionally sends the generated lesson script (not the arti
 - **Managed listening:** article text and narration requests are sent directly to [OpenRouter](https://openrouter.ai/) using a short-lived, dollar-capped key funded by Autovox. Requests require zero-data-retention routing and deny provider data collection. Bring-your-own-key OpenRouter requests deny provider data collection but otherwise follow your own OpenRouter privacy settings.
 - **OpenRouter BYOK:** article text and narration requests are sent to OpenRouter (and onward to the models you use there).
 - **OpenAI API key (fallback):** the same requests are sent directly to [OpenAI](https://openai.com/).
+- **Ask in ChatGPT or Claude (optional):** if you choose it after a brief, Autovox copies the spoken brief and your question to the clipboard and opens a new [ChatGPT](https://chatgpt.com/) or [Claude](https://claude.ai/) chat. The link contains no brief and no question. Those sites receive the brief only if you paste it. That conversation uses your ChatGPT or Claude account.
 
 Those providers process content under their own terms and privacy policies. The Autovox control plane never receives the page URL, title, article text, generated script, or audio.
 
@@ -45,7 +46,9 @@ Reconciled per-session product records are deleted after 90 days. Aggregate dail
 
 ## What is stored locally
 
-Settings (OpenRouter connection, optional OpenAI API key, voice, output language, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state may be kept in session storage while the extension is active.
+Settings (OpenRouter connection, optional OpenAI API key, voice, output language, report length) are stored in `chrome.storage.local` on your browser profile. Brief/script state for the tab you are on may be kept in session storage while the extension is active.
+
+**Saved briefs.** When a brief or chalkboard finishes, Autovox keeps a copy in this browser's IndexedDB so the player can show it again: the spoken script, chalkboard art, the page address, the page title, and the site name. The newest 40 are kept. **Remove** on an older brief deletes that copy. This copy never leaves your browser and is not sent to Autovox.
 
 Autovox also keeps a **local spend ledger** on this profile: cost, model, stage (understand, narrate, or chalkboard drawing), outcome (completed / fault / aborted), report length, voice, output language, and the article type the brief was written as (and whether you picked it or Autovox inferred it). That record does **not** include the page URL, title, or article text. BYOK ledger records are not sent to Autovox.
 
@@ -59,7 +62,7 @@ Provider keys and managed session keys are used only by the extension's backgrou
 
 - **activeTab / scripting:** temporary access to the tab you invoke Autovox on (toolbar icon or “Vox this page” context menu) so Autovox can inject the overlay and extract article text. Autovox does not request persistent access to all websites.
 - **contextMenus:** adds “Vox this page” and “Chalkboard this page” items to the page right-click menu that open Autovox and start the spoken brief or chalkboard lesson.
-- **storage:** save settings, the BYOK spend ledger, and short-lived managed session state on this profile.
+- **storage:** save settings, the BYOK spend ledger, the on-device library of briefs you generated, and short-lived managed session state on this profile.
 - **identity:** OpenRouter OAuth connect flow.
 - **Host access to `openrouter.ai` and `api.openai.com`:** call those APIs from the extension.
 - **Managed builds only — host access to `*.convex.cloud` and `*.clerk.accounts.dev`:** authenticate, reserve credits, open checkout, receive a capped provider key, and report coarse lifecycle outcomes. These hosts are omitted from BYOK-only builds.

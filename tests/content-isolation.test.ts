@@ -19,6 +19,7 @@ const BACKGROUND_ONLY = [
   "utils/narrationCache.ts",
   "utils/overlaySettings.ts",
   "utils/briefState.ts",
+  "utils/history.ts",
 ];
 
 const SPECIFIER =

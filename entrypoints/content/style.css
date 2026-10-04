@@ -211,14 +211,40 @@
   transform: rotate(180deg);
 }
 
-.type-picker {
-  order: 1;
-  flex: 1 0 100%;
+.type-picker,
+.play-menu {
   display: flex;
   flex-direction: column;
   gap: 6px;
   padding-top: 8px;
   border-top: 1px solid var(--av-track);
+}
+
+.play-menu__go {
+  appearance: none;
+  border: 1px solid var(--av-ink);
+  background: var(--av-face);
+  color: var(--av-ink);
+  padding: 2px 6px;
+  font-family: var(--av-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.play-menu__go:hover {
+  background: var(--av-aluminum);
+}
+
+.play-menu__go:focus-visible {
+  outline: 2px solid var(--av-accent);
+  outline-offset: 2px;
+}
+
+.player__icon-btn[aria-expanded='true'] {
+  background: var(--av-ink);
+  color: var(--av-accent-ink);
 }
 
 .type-picker__legend {
@@ -285,11 +311,105 @@
   align-self: flex-start;
 }
 
+/* Follow-up handoff: same full-width meta row as the article-type chooser. */
+.follow-up {
+  order: 1;
+  flex: 1 0 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px solid var(--av-track);
+}
+
+.follow-up__legend {
+  font-family: var(--av-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--av-muted);
+}
+
+.follow-up__question {
+  appearance: none;
+  width: 100%;
+  border: 1px solid var(--av-ink);
+  border-radius: 0;
+  background: var(--av-face);
+  color: var(--av-ink);
+  font-family: var(--av-font-ui);
+  font-size: 12px;
+  line-height: 1.4;
+  padding: 6px 8px;
+}
+
+.follow-up__question::placeholder {
+  color: var(--av-muted);
+}
+
+.follow-up__question:focus-visible {
+  outline: 2px solid var(--av-accent);
+  outline-offset: 2px;
+}
+
+.follow-up__targets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+
+.follow-up__target {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.follow-up__status {
+  margin: 0;
+  font-family: var(--av-font-mono);
+  font-size: 10px;
+  color: var(--av-muted);
+}
+
+.follow-up__status--error {
+  color: var(--av-danger);
+}
+
 .autovox-source {
   margin: 0;
   font-size: 11px;
   color: var(--av-muted);
   line-height: 1.4;
+}
+
+.reel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reel__skip {
+  flex: none;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.reel__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  font-family: var(--av-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.player[hidden] {
+  display: none;
 }
 
 /* Transport — meter */

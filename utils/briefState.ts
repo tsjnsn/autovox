@@ -1,4 +1,5 @@
 import type { ChalkSceneDrawing } from './chalk/types';
+import { rememberBrief, rememberDrawings } from './history';
 import { finishMoneySession } from './money';
 import { normalizePageUrl, samePageUrl } from './pageUrl';
 import type { BriefProgress, BriefResult } from './types';
@@ -158,6 +159,7 @@ export async function saveTabBriefResult(
   await mutatePersisted((map) => {
     map[tabKey(tabId)] = { pageUrl: normalized, result };
   });
+  await rememberBrief(result, normalized);
 
   const live = liveByTab.get(tabId);
   liveByTab.set(tabId, {
@@ -183,7 +185,7 @@ export async function saveTabChalkDrawing(
   scene: number,
   drawing: ChalkSceneDrawing,
 ): Promise<boolean> {
-  return await mutatePersisted((map) => {
+  const drawings = await mutatePersisted((map) => {
     const entry = map[tabKey(tabId)];
     if (
       !entry ||
@@ -191,15 +193,18 @@ export async function saveTabChalkDrawing(
       entry.result.moneySessionId !== sessionId ||
       !entry.result.lesson
     ) {
-      return false;
+      return null;
     }
-    const drawings = entry.result.lesson.scenes.map(
+    const next = entry.result.lesson.scenes.map(
       (_, index) => entry.result.drawings?.[index] ?? null,
     );
-    drawings[scene] = drawing;
-    entry.result = { ...entry.result, drawings };
-    return true;
+    next[scene] = drawing;
+    entry.result = { ...entry.result, drawings: next };
+    return next;
   });
+  if (!drawings) return false;
+  await rememberDrawings(sessionId, drawings);
+  return true;
 }
 
 export async function clearTabBrief(tabId: number): Promise<void> {
