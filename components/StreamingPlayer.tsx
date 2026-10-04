@@ -50,13 +50,15 @@ interface StreamingPlayerProps {
   onAbort?: (playbackSeconds: number) => void;
   /** Keep the transport mounted but paused and out of the way, so another tape can take the face. */
   held?: boolean;
+  /** False holds a saved listen silent until it's chosen from the play menu. */
+  armed?: boolean;
   /**
-   * A saved listen is on screen. Don't start audio until play is confirmed,
-   * and let that play click open the menu first.
+   * Play presses go to this menu instead while there's nothing to resume:
+   * a held saved listen, or narration that has played to the end.
    */
-  suspended?: boolean;
-  menuOpen?: boolean;
-  onPlayRequest?: () => void;
+  playMenu?: PlayMenuControl;
+  /** Filled with the transport's play, so the menu can start the narration. */
+  playRef?: MutableRefObject<(() => void) | null>;
   /** Narration requests in order; defaults to the script split for TTS. */
   chunks?: string[];
   /** Media-time span of each chunk, re-published as downloads progress. */
@@ -67,7 +69,18 @@ interface StreamingPlayerProps {
   onNarration?: (pcm: Uint8Array | null) => void;
 }
 
+export interface PlayMenuControl {
+  id: string;
+  open: boolean;
+  /** Play's name while a press would go to the menu. */
+  label: string;
+  onPress: () => void;
+}
+
 type TransportPhase = 'loading' | 'playing' | 'paused' | 'ready';
+
+/** Within this of the end, play starts over instead of resuming. */
+const END_SLACK_SECONDS = 0.15;
 
 /** Enable scrub once we have ~250ms of PCM (near start-buffer). */
 const SCRUB_ENABLE_SECONDS = 0.25;
@@ -100,9 +113,9 @@ export function StreamingPlayer({
   onError,
   onAbort,
   held = false,
-  suspended = false,
-  menuOpen = false,
-  onPlayRequest,
+  armed = true,
+  playMenu,
+  playRef,
   chunks,
   onChunkTimeline,
   clockRef,
@@ -118,7 +131,7 @@ export function StreamingPlayer({
   const cachePcmRef = useRef<Uint8Array | null>(null);
   const cacheCompleteRef = useRef(false);
   const liveScheduleRef = useRef(true);
-  const phaseRef = useRef<TransportPhase>(suspended ? 'ready' : 'loading');
+  const phaseRef = useRef<TransportPhase>(armed ? 'loading' : 'ready');
   const streamingRef = useRef(false);
   const scrubbingRef = useRef(false);
   const volumeDraggingRef = useRef(false);
@@ -143,7 +156,7 @@ export function StreamingPlayer({
 
   const estimatedSeconds = Math.max(1, script.estimatedSeconds || 120);
 
-  const [phase, setPhase] = useState<TransportPhase>(suspended ? 'ready' : 'loading');
+  const [phase, setPhase] = useState<TransportPhase>(armed ? 'loading' : 'ready');
   const [needsGesture, setNeedsGesture] = useState(false);
   const [error, setError] = useState('');
   const [errorKind, setErrorKind] = useState<BriefErrorKind>('fault');
@@ -521,9 +534,9 @@ export function StreamingPlayer({
   });
 
   // New script / model / voice / key → fresh stream (invalidates cache).
-  // A saved listen stays quiet until play is confirmed.
+  // A held saved listen stays quiet until it's chosen.
   useEffect(() => {
-    if (suspended) return;
+    if (!armed) return;
     restartStream();
 
     return () => {
@@ -531,7 +544,7 @@ export function StreamingPlayer({
       runIdRef.current += 1;
       streamingRef.current = false;
     };
-  }, [scriptKey, authRevision, model, voice, outputLanguage, suspended]);
+  }, [scriptKey, authRevision, model, voice, outputLanguage, armed]);
 
   const toggle = async () => {
     const player = playerRef.current;
@@ -562,7 +575,7 @@ export function StreamingPlayer({
         const end = cacheCompleteRef.current
           ? duration
           : bufferedSecondsRef.current;
-        const atEnd = end > 0 && position >= end - 0.15;
+        const atEnd = end > 0 && position >= end - END_SLACK_SECONDS;
         await playFromCache(atEnd ? 0 : position, { autoplay: true });
         return;
       }
@@ -583,6 +596,19 @@ export function StreamingPlayer({
       console.error(err);
     }
   };
+
+  const playFromMenu = useEffectEvent(() => {
+    void toggle();
+  });
+
+  useEffect(() => {
+    if (!playRef) return;
+    const play = () => playFromMenu();
+    playRef.current = play;
+    return () => {
+      if (playRef.current === play) playRef.current = null;
+    };
+  }, [playRef]);
 
   const scrubRef = useRef<HTMLDivElement | null>(null);
 
@@ -650,6 +676,13 @@ export function StreamingPlayer({
           : '';
 
   const showPlaying = phase === 'playing';
+  // Nothing to resume: held, or played through to the end of the full narration.
+  const atRest =
+    phase === 'ready' &&
+    (!armed ||
+      (bufferedSeconds >= duration - END_SLACK_SECONDS &&
+        position >= duration - END_SLACK_SECONDS));
+  const menuPress = playMenu && (playMenu.open || atRest) ? playMenu : null;
   const playedPct = Math.max(timeProgress * 100, 0);
   const bufferedPct = Math.max(bufferedProgress * 100, canScrub ? 0 : 8);
 
@@ -676,28 +709,12 @@ export function StreamingPlayer({
           type="button"
           className={`player__icon-btn${showPlaying ? ' player__icon-btn--live' : ' player__icon-btn--armed'}`}
           onClick={() => {
-            const current = phaseRef.current;
-            if (current === 'playing' || current === 'paused') {
-              void toggle();
-              return;
-            }
-            if (onPlayRequest) {
-              onPlayRequest();
-              return;
-            }
-            void toggle();
+            if (menuPress) menuPress.onPress();
+            else void toggle();
           }}
-          aria-label={
-            showPlaying
-              ? 'Pause'
-              : onPlayRequest
-                ? menuOpen
-                  ? 'Play the saved brief'
-                  : 'Choose brief or chalkboard'
-                : 'Play'
-          }
-          aria-expanded={onPlayRequest ? menuOpen : undefined}
-          aria-haspopup={onPlayRequest ? 'true' : undefined}
+          aria-label={showPlaying ? 'Pause' : (menuPress?.label ?? 'Play')}
+          aria-expanded={menuPress ? menuPress.open : undefined}
+          aria-controls={menuPress?.open ? menuPress.id : undefined}
         >
           {showPlaying ? <PauseIcon /> : <PlayIcon />}
         </button>

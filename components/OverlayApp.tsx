@@ -2,18 +2,19 @@ import {
   useCallback,
   useEffect,
   useEffectEvent,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from 'react';
 import { FollowUpAsk } from './FollowUpAsk';
-import { PlayMenu } from './PlayMenu';
+import { PlayMenu, playChoiceLabel, type PlayChoice } from './PlayMenu';
 import { ReelSkip, SavedBoard, SavedNotes } from './SavedTape';
 import { BriefMeter } from './BriefMeter';
 import { Chalkboard } from './Chalkboard';
 import { ScriptPreview } from './ScriptPreview';
-import { StreamingPlayer } from './StreamingPlayer';
+import { StreamingPlayer, type PlayMenuControl } from './StreamingPlayer';
 import { samePageUrl } from '../utils/pageUrl';
 import {
   errorMeterLabel,
@@ -24,6 +25,7 @@ import { lessonTtsChunks } from '../utils/tts';
 import {
   choiceChangesType,
   effectiveArticleTypeChoice,
+  rebriefCreditsLabel,
   type ArticleTypeChoice,
 } from '../utils/comprehension';
 import { downloadVideo, renderChalkVideo } from '../utils/chalk/video';
@@ -150,8 +152,10 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const [tape, setTape] = useState<SavedTape | null>(null);
   const [savedTick, setSavedTick] = useState(0);
   const [playMenuOpen, setPlayMenuOpen] = useState(false);
-  /** False while a saved listen is waiting. Play opens the menu before audio starts. */
+  const playMenuId = useId();
+  /** False while a saved listen waits to be chosen from the play menu. */
   const [armPlayback, setArmPlayback] = useState(false);
+  const playRef = useRef<(() => void) | null>(null);
   const exportAbortRef = useRef<AbortController | null>(null);
   const sceneBacklogRef = useRef<SceneBacklog | null>(null);
   const getBoardTime = useCallback(() => clockRef.current?.() ?? 0, []);
@@ -368,6 +372,25 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     result?.articleType ?? null,
     settings?.articleType,
   );
+
+  /** This page's listen, when play can start it again without spending. */
+  const replayFormat: SessionFormat | null =
+    hasPlayer && showingLive && result ? (result.format ?? 'brief') : null;
+  // A type pick that would tell the page differently means a new listen.
+  const primaryPlay: PlayChoice =
+    replayFormat &&
+    !choiceChangesType(articleTypeChoice, result?.articleType ?? null)
+      ? 'replay'
+      : (replayFormat ?? 'brief');
+  const managedLength =
+    settings?.providerMode === 'managed' ? settings.reportLength : null;
+  const newSessionCosts =
+    result && managedLength
+      ? {
+          brief: rebriefCreditsLabel('brief', managedLength),
+          chalkboard: rebriefCreditsLabel('chalkboard', managedLength),
+        }
+      : null;
 
   const handleNarration = useCallback((pcm: Uint8Array | null) => {
     exportAbortRef.current?.abort();
@@ -609,34 +632,28 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
     }
   };
 
-  const beginFromMenu = (format: SessionFormat) => {
+  const choosePlay = (choice: PlayChoice) => {
     setPlayMenuOpen(false);
-    setArmPlayback(true);
-    void startBrief(format);
-  };
-
-  const playSaved = (format: SessionFormat) => {
-    if (
-      showingLive &&
-      result &&
-      result.format === format &&
-      !choiceChangesType(articleTypeChoice, result.articleType ?? null) &&
-      !armPlayback
-    ) {
-      setPlayMenuOpen(false);
+    if (choice !== 'replay') {
+      void startBrief(choice);
+    } else if (armPlayback) {
+      playRef.current?.();
+    } else {
       setArmPlayback(true);
-      return;
     }
-    beginFromMenu(format);
   };
 
-  const playCached = () => {
-    if (!playMenuOpen) {
-      setPlayMenuOpen(true);
-      return;
-    }
-    setPlayMenuOpen(false);
-    setArmPlayback(true);
+  /** The first press opens the menu; a second press starts what it marks. */
+  const pressPlay = () => {
+    if (playMenuOpen) choosePlay(primaryPlay);
+    else setPlayMenuOpen(true);
+  };
+
+  const playMenu: PlayMenuControl = {
+    id: playMenuId,
+    open: playMenuOpen,
+    label: playMenuOpen ? playChoiceLabel(primaryPlay) : 'Play',
+    onPress: pressPlay,
   };
 
   const clearBrief = async () => {
@@ -665,7 +682,6 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
   const handleDone = useCallback((playbackSeconds: number) => {
     setPhase('ready');
     setNarrating(false);
-    setArmPlayback(false);
     void finishTtsSession('completed');
     void reportManagedPlayback({ type: 'completed', playbackSeconds });
   }, [finishTtsSession, reportManagedPlayback]);
@@ -723,41 +739,30 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
         ) : null}
 
         {hasPlayer ? (
-          <>
-            <StreamingPlayer
-              held={!showingLive}
-              key={`${streamKey}:${settings!.providerMode}`}
-              script={result!.script}
-              briefId={result!.moneySessionId ?? null}
-              authRevision={authRevision}
-              managedSessionId={managedNarration?.sessionId ?? null}
-              moneySessionRef={moneySessionRef}
-              onManagedSession={handleManagedSession}
-              chunks={lessonChunks}
-              onChunkTimeline={lesson ? setTimeline : undefined}
-              clockRef={lesson ? clockRef : undefined}
-              onNarration={lesson ? handleNarration : undefined}
-              model={settings!.narrationModel}
-              voice={settings!.voice}
-              outputLanguage={result!.outputLanguage ?? settings!.outputLanguage}
-              onPlaying={handlePlaying}
-              onDone={handleDone}
-              onError={handleError}
-              onAbort={handleAbort}
-              suspended={!armPlayback}
-              menuOpen={playMenuOpen}
-              onPlayRequest={armPlayback ? undefined : playCached}
-            />
-            {showingLive ? (
-              <>
-                <p className="autovox-source">
-                  {result!.source.siteName ? `${result!.source.siteName} · ` : ''}
-                  {result!.source.title}
-                </p>
-                <ScriptPreview script={result!.script} />
-              </>
-            ) : null}
-          </>
+          <StreamingPlayer
+            held={!showingLive}
+            key={`${streamKey}:${settings!.providerMode}`}
+            script={result!.script}
+            briefId={result!.moneySessionId ?? null}
+            authRevision={authRevision}
+            managedSessionId={managedNarration?.sessionId ?? null}
+            moneySessionRef={moneySessionRef}
+            onManagedSession={handleManagedSession}
+            chunks={lessonChunks}
+            onChunkTimeline={lesson ? setTimeline : undefined}
+            clockRef={lesson ? clockRef : undefined}
+            onNarration={lesson ? handleNarration : undefined}
+            model={settings!.narrationModel}
+            voice={settings!.voice}
+            outputLanguage={result!.outputLanguage ?? settings!.outputLanguage}
+            onPlaying={handlePlaying}
+            onDone={handleDone}
+            onError={handleError}
+            onAbort={handleAbort}
+            armed={armPlayback}
+            playMenu={showingLive ? playMenu : undefined}
+            playRef={playRef}
+          />
         ) : null}
         {hasPlayer && showingLive ? null : (
           <BriefMeter
@@ -766,19 +771,10 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
             error={fault?.message ?? ''}
             labelIsError={Boolean(fault) || hasAuth === false}
             playDisabled={busy || hasAuth === false}
-            playLabel={
-              playMenuOpen
-                ? 'Play the brief'
-                : 'Choose brief or chalkboard'
-            }
+            playLabel={playMenu.label}
+            menuId={playMenuId}
             menuOpen={playMenuOpen}
-            onPlay={() => {
-              if (!playMenuOpen) {
-                setPlayMenuOpen(true);
-                return;
-              }
-              beginFromMenu('brief');
-            }}
+            onPlay={pressPlay}
             sourceWords={sourceWords}
             draft={draft}
           />
@@ -786,26 +782,27 @@ export function OverlayApp({ onClose, onReady }: OverlayAppProps) {
 
         {playMenuOpen ? (
           <PlayMenu
-            choice={articleTypeChoice}
-            current={result?.articleType ?? null}
-            onChoose={setArticleTypeOverride}
+            id={playMenuId}
+            replayFormat={replayFormat}
             replacing={Boolean(result)}
-            cachedFormat={
-              hasPlayer && showingLive && result ? result.format : null
-            }
-            managedLength={
-              settings?.providerMode === 'managed' ? settings.reportLength : null
-            }
-            onStart={playSaved}
-            onRegenerate={
-              hasPlayer && result
-                ? () => beginFromMenu(result.format ?? 'brief')
-                : onFace
-                  ? () => beginFromMenu(onFace.format)
-                  : undefined
-            }
+            primary={primaryPlay}
+            costs={newSessionCosts}
+            onPick={choosePlay}
+            articleType={articleTypeChoice}
+            currentType={result?.articleType ?? null}
+            onArticleType={setArticleTypeOverride}
             onClose={() => setPlayMenuOpen(false)}
           />
+        ) : null}
+
+        {hasPlayer && showingLive ? (
+          <>
+            <p className="autovox-source">
+              {result!.source.siteName ? `${result!.source.siteName} · ` : ''}
+              {result!.source.title}
+            </p>
+            <ScriptPreview script={result!.script} />
+          </>
         ) : null}
 
         {onFace ? <SavedNotes tape={onFace} /> : null}

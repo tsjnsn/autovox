@@ -184,70 +184,103 @@
 }
 
 /*
- * Article type: a right-aligned readout at the end of the meta row. With no
- * separator before it, it can drop to its own line without a stray dot.
+ * Play menu: drops from play whenever a press would start something. The
+ * notch points back at play; ▶ marks what a second press starts.
  */
-.type-picker__toggle {
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  white-space: nowrap;
-}
-
-.type-picker__mode {
-  color: var(--av-muted);
-}
-
-.type-picker__caret {
-  width: 0;
-  height: 0;
-  border-left: 3px solid transparent;
-  border-right: 3px solid transparent;
-  border-top: 4px solid currentColor;
-}
-
-.type-picker__toggle[aria-expanded='true'] .type-picker__caret {
-  transform: rotate(180deg);
-}
-
-.type-picker,
 .play-menu {
+  position: relative;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--av-track);
+  gap: 10px;
+  padding-top: 6px;
+  border-top: 1px solid var(--av-ink);
 }
 
-.play-menu__go {
-  appearance: none;
-  border: 1px solid var(--av-ink);
+.play-menu::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: 11px;
+  width: 9px;
+  height: 9px;
   background: var(--av-face);
+  border-top: 1px solid var(--av-ink);
+  border-left: 1px solid var(--av-ink);
+  transform: rotate(45deg);
+}
+
+.play-menu__items {
+  display: flex;
+  flex-direction: column;
+}
+
+.play-menu__item {
+  appearance: none;
+  display: grid;
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  align-items: center;
+  column-gap: 8px;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   color: var(--av-ink);
-  padding: 2px 6px;
-  font-family: var(--av-font-mono);
-  font-size: 11px;
-  font-weight: 500;
-  line-height: 1.4;
+  font-family: var(--av-font-ui);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.3;
+  text-align: left;
   cursor: pointer;
 }
 
-.play-menu__go:hover {
+.play-menu__item:hover {
   background: var(--av-aluminum);
 }
 
-.play-menu__go:focus-visible {
+.play-menu__item:focus-visible {
   outline: 2px solid var(--av-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
-.player__icon-btn[aria-expanded='true'] {
-  background: var(--av-ink);
-  color: var(--av-accent-ink);
+.play-menu__cue {
+  display: inline-flex;
+  color: var(--av-accent);
 }
 
-.type-picker__legend {
+.play-menu__cue .player__svg {
+  width: 10px;
+  height: 10px;
+}
+
+.play-menu__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.play-menu__meta {
+  font-family: var(--av-font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  color: var(--av-muted);
+  white-space: nowrap;
+}
+
+/* Article type: a bank of owned keys over hidden native radios. */
+.play-menu__types {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.play-menu__legend {
+  margin-bottom: 6px;
+  padding: 0;
   font-family: var(--av-font-mono);
   font-size: 10px;
   font-weight: 500;
@@ -256,18 +289,21 @@
   color: var(--av-muted);
 }
 
-.type-picker__choices {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
+.play-menu__bank {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(58px, 1fr));
+  border-top: 1px solid var(--av-ink);
+  border-left: 1px solid var(--av-ink);
 }
 
-.type-picker__choice {
+.play-menu__type {
   position: relative;
-  display: inline-flex;
+  display: flex;
+  border-right: 1px solid var(--av-ink);
+  border-bottom: 1px solid var(--av-ink);
 }
 
-.type-picker__choice input {
+.play-menu__type input {
   position: absolute;
   inset: 0;
   width: 100%;
@@ -277,41 +313,48 @@
   cursor: pointer;
 }
 
-.type-picker__face {
-  border: 1px solid var(--av-ink);
+.play-menu__type-face {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 4px;
   background: var(--av-face);
   color: var(--av-ink);
-  padding: 2px 6px;
   font-family: var(--av-font-mono);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
-  line-height: 1.4;
+  line-height: 1.2;
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.type-picker__face--current {
-  border-style: dashed;
-}
-
-.type-picker__choice:hover .type-picker__face {
+.play-menu__type:hover .play-menu__type-face {
   background: var(--av-aluminum);
 }
 
-.type-picker__choice input:checked + .type-picker__face {
+.play-menu__type input:checked + .play-menu__type-face {
   background: var(--av-ink);
   color: var(--av-face);
-  border-style: solid;
 }
 
-.type-picker__choice input:focus-visible + .type-picker__face {
+.play-menu__type input:focus-visible + .play-menu__type-face {
   outline: 2px solid var(--av-accent);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
-.type-picker__rebrief {
-  align-self: flex-start;
+/* Pip: the type this page's listen was told as. */
+.play-menu__type-face--told::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 4px;
+  height: 4px;
+  background: currentColor;
 }
 
-/* Follow-up handoff: same full-width meta row as the article-type chooser. */
+/* Follow-up handoff: drops to its own full-width line in the meta row. */
 .follow-up {
   order: 1;
   flex: 1 0 100%;

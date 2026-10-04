@@ -104,17 +104,13 @@ Show script
 Options                                (idle)
 Options · Ask · Clear                         (after script ready)
 
-The first click on play opens Brief, Chalkboard, and the article type.
-Brief or Chalkboard is what starts. A second click on play starts a brief.
-Play and pause after that stay the transport.
-A saved listen does the same: play opens that menu first, and the menu adds
-Re-generate. A second click on play plays the saved audio. Re-generate makes
-a new one.
+When a press of play would start something, it opens the play menu first
+(see Play menu). Mid-listen, play is only play and pause.
 
 Saved briefs stay in the player. When more than one is saved, ‹ › steps
 newer and older. The brief for this page keeps its transport. An older one
 shows its script and board in that same face, and Remove drops that copy.
-Play still briefs this page.
+Play still starts from this page.
 Ask opens under the meta row: a question line, then ChatGPT · Claude.
 Those links copy the brief and open that app. Neither spends a credit.
 ```
@@ -155,8 +151,7 @@ AUTOVOX                                         Close
 source…
 Show script
 
-Options · Export video · Clear             Infer · Explainer ▾
-                                   (Export video once the narration has fully downloaded)
+Options · Export video · Clear     (Export video once the narration has fully downloaded)
 ```
 
 - The board is a display on the same instrument, not a second mode: one transport row still drives it, and the chassis only widens.
@@ -165,20 +160,26 @@ Options · Export video · Clear             Infer · Explainer ▾
 - **Chalkboard** is chosen in the play menu, then it starts. It is not a second button beside Options.
 - **Export video** is meta too: the link itself shows progress ("Exporting 42%"), clicking it again cancels, and a failure reads "Export failed" in danger ink with the reason on hover. No modal, no second progress bar.
 
-### Article type
+### Play menu
 
 ```
-[▶] ===meter===
-Brief · Chalkboard
+[▶] ◁) ===meter===                2:14 / 2:14
+─^────────────────────────────────────────────
+ ▶ Play again                           saved
+   New brief                         1 credit
+   New chalkboard                   2 credits
 ARTICLE TYPE
-[Infer] [News] [Feature] [Explainer]
-[Opinion] [How-to] [Research] [Interview]
+[■Infer■][ News ▪][ Feature ][Explainer]
+[Opinion][ How-to][Research ][Interview]
 ```
 
-- The article type (news, feature, explainer, opinion, how-to, research, interview) shapes how the page is told and boarded. The default lives in Options; the overlay overrides it for this play.
-- The choices sit under play, not in the meta row. Owned chips over hidden native radios. The type already on a brief gets a dashed border.
-- Choosing a type does not spend anything. Brief or Chalkboard starts the session. If a brief is already on screen, those actions name the credit cost in managed mode.
-- A saved listen adds Re-generate. That spends the way a new brief does. Choosing the format already saved plays that copy, until the article type changes.
+- Play opens the menu when a press would start something: on a fresh page, on a saved listen that hasn't played in this overlay, and once narration has played to the end (the end screen). Mid-listen, play only plays and pauses. Scrubbing back after the end and pressing play resumes from there.
+- It sits in the faceplate's flow under the transport, joined to play by a notch in its top rule. No modal, no floating popover, no second card.
+- ▶ marks what a second press of play starts, so pressing play twice still means go. The marked row has focus when the menu opens, so Enter starts it too.
+- Rows: **Play again** when this page has a saved listen (spends nothing), then **Brief** and **Chalkboard**. Once the page has a listen they read **New brief** and **New chalkboard**, and in managed mode they name their credits at the right edge, in mono.
+- **Article type** (news, feature, explainer, opinion, how-to, research, interview) shapes how the page is told and boarded. The default lives in Options; the menu overrides it for this page. It's a bank of owned keys over hidden native radios: four across in the card, one row across the chalkboard. The pick is filled with ink, and a pip marks the type this page's listen was told as.
+- Choosing a type spends nothing and only shapes new sessions. If the pick would tell the page differently, ▶ moves from Play again to the new session of the same format.
+- Esc or a press anywhere else closes it, and Esc returns focus to play. ↑ and ↓ move between rows.
 
 ## Motion
 

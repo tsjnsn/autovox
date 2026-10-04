@@ -64,8 +64,9 @@ interface BriefMeterProps {
   labelIsError: boolean;
   playDisabled: boolean;
   playLabel: string;
-  /** First click opened the brief / chalkboard / type choices. */
-  menuOpen?: boolean;
+  /** The play menu this button opens. */
+  menuId: string;
+  menuOpen: boolean;
   onPlay: () => void;
   /** Words in the extracted article; shown while the model reads it. */
   sourceWords: number | null;
@@ -84,7 +85,8 @@ export function BriefMeter({
   labelIsError,
   playDisabled,
   playLabel,
-  menuOpen = false,
+  menuId,
+  menuOpen,
   onPlay,
   sourceWords,
   draft,
@@ -130,7 +132,7 @@ export function BriefMeter({
           onClick={onPlay}
           aria-label={playLabel}
           aria-expanded={menuOpen}
-          aria-haspopup="true"
+          aria-controls={menuOpen ? menuId : undefined}
         >
           <PlayIcon />
         </button>
