@@ -1,11 +1,11 @@
 {
-  "fetchedAt": "2026-10-21T06:47:18.469Z",
+  "fetchedAt": "2026-10-22T06:47:25.969Z",
   "extensionId": "aodlbiejdiibbpemagfngbdhaappejda",
   "name": "Autovox",
   "listingUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda",
   "reviewsUrl": "https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda/reviews",
   "version": "0.4.1",
-  "userCount": 5,
+  "userCount": 4,
   "rating": null,
   "reviewCount": null,
   "size": "2.07MiB",
@@ -15,19 +15,20 @@
   "privacyPolicyUrl": "https://raw.githubusercontent.com/tsjnsn/autovox/refs/heads/main/PRIVACY.md",
   "reviews": [],
   "previous": {
-    "fetchedAt": "2026-10-19T06:59:59.791Z",
-    "userCount": null,
+    "fetchedAt": "2026-10-21T06:47:18.469Z",
+    "userCount": 5,
     "rating": null,
     "reviewCount": null,
     "version": "0.4.1"
   },
   "deltas": {
-    "userCount": null,
+    "userCount": -1,
     "rating": null,
     "reviewCount": null,
     "newReviewIds": []
   },
   "suggestedActions": [
-    "Listing conversion is the bottleneck: expand the Chrome Web Store long description and screenshots before adding product surface area."
+    "Listing conversion is the bottleneck: expand the Chrome Web Store long description and screenshots before adding product surface area.",
+    "User count dropped by 1. Check uninstall reasons in the Developer Dashboard and recent reviews."
   ]
 }
