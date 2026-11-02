@@ -1,10 +1,10 @@
 # Store pulse — Autovox flywheel
 
-Fetched **2026-11-01T06:29:44.603Z** from the public [Chrome Web Store listing](https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda).
+Fetched **2026-11-02T06:40:05.384Z** from the public [Chrome Web Store listing](https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda).
 
 | Signal | Now | Δ vs last pulse |
 | --- | --- | --- |
-| Users (public count) | 2 | -1 |
+| Users (public count) | unknown | — |
 | Rating | unrated | — |
 | Reviews | 0 | — |
 | Listed version | 0.4.1 | 0.4.1 → 0.4.1 |
@@ -23,6 +23,5 @@ CWS listing GA measurement id (store-page traffic, not in-extension events): `G-
 ## Suggested actions
 
 - Listing conversion is the bottleneck: expand the Chrome Web Store long description and screenshots before adding product surface area.
-- User count dropped by 1. Check uninstall reasons in the Developer Dashboard and recent reviews.
 
 <!-- flywheel-marker -->
