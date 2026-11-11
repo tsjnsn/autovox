@@ -1,10 +1,10 @@
 # Store pulse — Autovox flywheel
 
-Fetched **2026-11-10T06:31:19.467Z** from the public [Chrome Web Store listing](https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda).
+Fetched **2026-11-11T06:32:13.570Z** from the public [Chrome Web Store listing](https://chromewebstore.google.com/detail/autovox/aodlbiejdiibbpemagfngbdhaappejda).
 
 | Signal | Now | Δ vs last pulse |
 | --- | --- | --- |
-| Users (public count) | unknown | — |
+| Users (public count) | 4 | — |
 | Rating | unrated | — |
 | Reviews | 0 | — |
 | Listed version | 0.4.1 | 0.4.1 → 0.4.1 |
